@@ -9,7 +9,13 @@ import com.app.pustakam.core.database.localdb.preferences.UserPreference
 import com.app.pustakam.core.model.models.BaseResponse
 import com.app.pustakam.core.model.models.request.Login
 import com.app.pustakam.core.model.models.request.RegisterReq
+import com.app.pustakam.core.model.models.profile.PublicUser
+import com.app.pustakam.core.model.models.profile.SetUsernameReq
+import com.app.pustakam.core.model.models.profile.UpdateProfileReq
+import com.app.pustakam.core.model.models.profile.UsernameAvailability
 import com.app.pustakam.core.model.models.response.User
+import com.app.pustakam.core.model.validation.UsernameRules
+import com.app.pustakam.core.network.MediaUpload
 import kotlinx.coroutines.flow.StateFlow
 
 internal class AuthRepository : BaseRepository(), IAuthRepository {
@@ -58,8 +64,24 @@ internal class AuthRepository : BaseRepository(), IAuthRepository {
     override suspend fun deleteUser(): Result<BaseResponse<User>, Error> =
         apiClient.deleteUser(session.userId)
 
-    override suspend fun profileImage(): Result<BaseResponse<User>, Error> =
-        apiClient.profileImage()
+    override suspend fun uploadAvatar(file: MediaUpload): Result<BaseResponse<User>, Error> =
+        apiClient.uploadAvatar(file)
+
+    override suspend fun updateProfile(request: UpdateProfileReq): Result<BaseResponse<User>, Error> =
+        apiClient.updateProfile(session.userId, request)
+
+    /** 🆔 canonicalised here so both platforms send the same thing — same place as Login.canonical(). */
+    override suspend fun setUsername(username: String): Result<BaseResponse<User>, Error> =
+        apiClient.setUsername(session.userId, SetUsernameReq(UsernameRules.canonical(username)))
+
+    override suspend fun checkUsername(username: String): Result<BaseResponse<UsernameAvailability>, Error> =
+        apiClient.checkUsername(UsernameRules.canonical(username))
+
+    override suspend fun getPublicProfile(username: String): Result<BaseResponse<PublicUser>, Error> =
+        apiClient.getPublicProfile(UsernameRules.canonical(username))
+
+    override suspend fun searchPeople(query: String, limit: Int): Result<BaseResponse<List<PublicUser>>, Error> =
+        apiClient.searchPeople(UsernameRules.canonical(query), limit)
 
     override suspend fun userLogout() {
         userPrefs.clear()

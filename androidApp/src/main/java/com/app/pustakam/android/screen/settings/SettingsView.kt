@@ -62,6 +62,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.app.pustakam.android.MyApplicationTheme
+import com.app.pustakam.android.screen.navigation.Route
+import com.app.pustakam.android.widgets.CircleIconLoad
+import com.app.pustakam.core.network.toAbsoluteMediaUrl
 import com.app.pustakam.android.theme.ThemeMode
 import com.app.pustakam.android.theme.ThemeTilePicker
 import com.app.pustakam.android.theme.radiusLg
@@ -89,6 +92,7 @@ fun SettingsScreen(
         onAutoBackupChange = viewModel::onAutoBackupChange,
         onOfflineModeChange = viewModel::onOfflineModeChange,
         onReadingModeChange = viewModel::onReadingModeChange,
+        onOpenProfile = { onNavigate(Route.Profile) },
         onLogout = viewModel::logout
     )
 }
@@ -104,6 +108,7 @@ fun SettingsContent(
     onAutoBackupChange: (Boolean) -> Unit = {},
     onOfflineModeChange: (Boolean) -> Unit = {},
     onReadingModeChange: (Boolean) -> Unit = {},
+    onOpenProfile: () -> Unit = {},
     onLogout : () -> Unit = {}
 ) {
     Column(
@@ -119,7 +124,9 @@ fun SettingsContent(
             initial = state.profileInitial,
             name = state.profileName,
             subtitle = state.profileSubtitle,
-            badge = state.profileBadge
+            badge = state.profileBadge,
+            avatarUrl = state.user?.avatarUrl.toAbsoluteMediaUrl(),
+            onClick = onOpenProfile
         )
 
         // 🎨 Appearance — the only live section
@@ -357,7 +364,9 @@ fun SettingsProfileHeader(
     initial: String,
     name: String,
     subtitle: String,
-    badge: String? = null
+    badge: String? = null,
+    avatarUrl: String? = null,
+    onClick: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -365,22 +374,28 @@ fun SettingsProfileHeader(
             .clip(RoundedCornerShape(radiusLg))
             .background(colorScheme.surface)
             .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(radiusLg))
+            .clickable(onClick = onClick)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(54.dp)
-                .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(GranthIndigo, GranthForest))),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = initial,
-                style = MaterialTheme.typography.displaySmall,
-                color = Color.White
-            )
+        // 🖼️ the gradient initial is the placeholder, so a user with no picture still reads as themselves
+        if (avatarUrl.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(GranthIndigo, GranthForest))),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = initial,
+                    style = MaterialTheme.typography.displaySmall,
+                    color = Color.White
+                )
+            }
+        } else {
+            CircleIconLoad(url = avatarUrl, size = 54.dp, onClick = onClick)
         }
 
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {

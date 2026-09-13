@@ -424,3 +424,160 @@ WHERE n.deleted = 0
 AND c.assetId IS NOT NULL AND c.assetId != ''
 AND (c.localPath IS NULL OR c.localPath = '')
 LIMIT :limit;
+
+-- 💬 31-Aug-2026 chat: conversations and messages. Existing installs get these via 8.sqm.
+--   attachments is a JSON string rather than a typed column on purpose: it keeps :core:database
+--   free of chat-specific ColumnAdapters, and ChatDao is the only code that reads or writes it.
+CREATE TABLE ChatConversationEntity(
+id TEXT NOT NULL PRIMARY KEY,
+kind TEXT NOT NULL DEFAULT 'DIRECT',
+participantIds TEXT NOT NULL DEFAULT '',
+peerId TEXT,
+peerName TEXT,
+peerAvatarUrl TEXT,
+title TEXT,
+createdBy TEXT,
+createdAt INTEGER NOT NULL DEFAULT 0,
+updatedAt INTEGER NOT NULL DEFAULT 0,
+serverUpdatedAt INTEGER,
+lastMessageAt INTEGER NOT NULL DEFAULT 0,
+lastMessagePreview TEXT NOT NULL DEFAULT '',
+lastMessageSenderId TEXT,
+unreadCount INTEGER NOT NULL DEFAULT 0,
+deleted INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE ChatMessageEntity(
+id TEXT NOT NULL PRIMARY KEY,
+-- 🔗 deliberately NOT a foreign key. A message routinely arrives BEFORE its conversation
+-- row does (someone starts a chat with you), and an FK would reject that insert outright —
+-- losing the message. ChatRepository fetches the missing conversation instead, and
+-- deleteMessagesForConversation is the cleanup path.
+conversationId TEXT NOT NULL,
+senderId TEXT,
+kind TEXT NOT NULL DEFAULT 'USER',
+text TEXT NOT NULL DEFAULT '',
+attachments TEXT NOT NULL DEFAULT '',
+clientId TEXT,
+replyToId TEXT,
+status TEXT NOT NULL DEFAULT 'SENDING',
+aiState TEXT,
+aiError TEXT,
+createdAt INTEGER NOT NULL DEFAULT 0,
+updatedAt INTEGER NOT NULL DEFAULT 0,
+serverUpdatedAt INTEGER,
+deleted INTEGER NOT NULL DEFAULT 0
+);
+
+-- Paging a thread is (conversationId, createdAt); without this every scroll scans the table
+CREATE INDEX idx_chatmessage_thread ON ChatMessageEntity(conversationId, createdAt);
+
+-- A resend repeats clientId, and this is what makes the "have I already stored this?" lookup cheap
+CREATE INDEX idx_chatmessage_client ON ChatMessageEntity(conversationId, clientId);
+
+-- The outbox: everything typed while offline, oldest first
+CREATE INDEX idx_chatmessage_pending ON ChatMessageEntity(status, createdAt);
+
+-- The inbox list: live conversations, most recent activity first
+CREATE INDEX idx_chatconversation_recent ON ChatConversationEntity(deleted, lastMessageAt);
+
+
+-- ── chat ──────────────────────────────────────────────────────────────────────
+-- 💬 31-Aug-2026: the local thread is the source of truth on screen. A message is written here
+--   FIRST and only then sent, so a bubble appears instantly and survives losing the network.
+
+upsertConversation:
+INSERT OR REPLACE INTO ChatConversationEntity(
+id, kind, participantIds, peerId, peerName, peerAvatarUrl, title, createdBy,
+createdAt, updatedAt, serverUpdatedAt, lastMessageAt, lastMessagePreview,
+lastMessageSenderId, unreadCount, deleted)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+
+selectConversations:
+SELECT * FROM ChatConversationEntity
+WHERE deleted = 0
+ORDER BY lastMessageAt DESC, id DESC;
+
+selectConversationById:
+SELECT * FROM ChatConversationEntity WHERE id = ?;
+
+-- 🔢 the badge on the bottom bar: every unread message across every live thread
+selectTotalUnread:
+SELECT COALESCE(SUM(unreadCount), 0) FROM ChatConversationEntity WHERE deleted = 0;
+
+updateConversationUnread:
+UPDATE ChatConversationEntity SET unreadCount = :unreadCount WHERE id = :id;
+
+-- 📌 the list row follows the newest message without rewriting the whole conversation row
+touchConversation:
+UPDATE ChatConversationEntity
+SET lastMessageAt = :lastMessageAt,
+    lastMessagePreview = :lastMessagePreview,
+    lastMessageSenderId = :lastMessageSenderId,
+    updatedAt = :updatedAt
+WHERE id = :id;
+
+softDeleteConversation:
+UPDATE ChatConversationEntity SET deleted = 1, updatedAt = :updatedAt WHERE id = :id;
+
+upsertMessage:
+INSERT OR REPLACE INTO ChatMessageEntity(
+id, conversationId, senderId, kind, text, attachments, clientId, replyToId,
+status, aiState, aiError, createdAt, updatedAt, serverUpdatedAt, deleted)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+
+selectMessagesPage:
+SELECT * FROM ChatMessageEntity
+WHERE conversationId = :conversationId AND deleted = 0
+ORDER BY createdAt DESC, id DESC
+LIMIT :limit OFFSET :offset;
+
+selectMessagesBefore:
+SELECT * FROM ChatMessageEntity
+WHERE conversationId = :conversationId AND deleted = 0 AND createdAt < :before
+ORDER BY createdAt DESC, id DESC
+LIMIT :limit;
+
+selectMessageById:
+SELECT * FROM ChatMessageEntity WHERE id = ?;
+
+-- 🔁 the local half of send idempotency: has this device already stored this clientId?
+selectMessageByClientId:
+SELECT * FROM ChatMessageEntity WHERE conversationId = :conversationId AND clientId = :clientId;
+
+-- ✍️ an AI reply grows token by token, so only the text and the state move
+updateMessageText:
+UPDATE ChatMessageEntity
+SET text = :text, aiState = :aiState, aiError = :aiError, updatedAt = :updatedAt
+WHERE id = :id;
+
+updateMessageStatus:
+UPDATE ChatMessageEntity SET status = :status, updatedAt = :updatedAt WHERE id = :id;
+
+-- 🆔 the server's id replaces the optimistic one; INSERT OR REPLACE cannot change a primary key
+replaceMessageId:
+UPDATE ChatMessageEntity
+SET id = :serverId, status = :status, serverUpdatedAt = :serverUpdatedAt, updatedAt = :updatedAt
+WHERE id = :localId;
+
+-- 👀 my own messages the other side has now read
+markOutgoingRead:
+UPDATE ChatMessageEntity
+SET status = 'READ', updatedAt = :updatedAt
+WHERE conversationId = :conversationId AND senderId = :senderId
+AND createdAt <= :upTo AND status != 'READ';
+
+-- 📤 the outbox: what was typed while offline, oldest first so order is preserved
+selectPendingMessages:
+SELECT * FROM ChatMessageEntity
+WHERE status IN ('SENDING', 'FAILED') AND deleted = 0
+ORDER BY createdAt ASC
+LIMIT :limit;
+
+softDeleteMessage:
+UPDATE ChatMessageEntity
+SET deleted = 1, text = '', attachments = '', updatedAt = :updatedAt
+WHERE id = :id;
+
+deleteMessagesForConversation:
+DELETE FROM ChatMessageEntity WHERE conversationId = ?;

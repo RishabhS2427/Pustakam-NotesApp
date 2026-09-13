@@ -12,6 +12,18 @@ import com.app.pustakam.core.model.models.sync.SyncPullResponse
 import com.app.pustakam.core.model.models.sync.SyncPushRequest
 import com.app.pustakam.core.model.models.sync.SyncPushResponse
 import com.app.pustakam.core.model.models.sync.MediaUploadResponse
+import com.app.pustakam.core.model.models.chat.ChatConversationWire
+import com.app.pustakam.core.model.models.chat.ChatMessageWire
+import com.app.pustakam.core.model.models.chat.ChatParticipantWire
+import com.app.pustakam.core.model.models.chat.DeleteConversationResponse
+import com.app.pustakam.core.model.models.chat.MarkReadRequest
+import com.app.pustakam.core.model.models.chat.OpenConversationRequest
+import com.app.pustakam.core.model.models.chat.ReadReceiptWire
+import com.app.pustakam.core.model.models.chat.SendMessageRequest
+import com.app.pustakam.core.model.models.profile.PublicUser
+import com.app.pustakam.core.model.models.profile.SetUsernameReq
+import com.app.pustakam.core.model.models.profile.UpdateProfileReq
+import com.app.pustakam.core.model.models.profile.UsernameAvailability
 import com.app.pustakam.core.common.util.NetworkError
 import io.ktor.client.request.delete
 import io.ktor.client.request.forms.formData
@@ -106,9 +118,85 @@ class ApiCallClient : BaseClient() {
         delete(url = "${ApiRoute.USERS.getName()}/$userId")
 
 
-    suspend fun profileImage(): Result<BaseResponse<User>, Error> =
-        post(url = ApiRoute.PROFILE.getName(),contentType = ContentType.Application.FormUrlEncoded, requestData = null)
 
+
+    // ── profile ───────────────────────────────────────────────────────────
+    // 👤 31-Aug-2026. /users/{id} is the SELF view (owner-guarded); /u/* is what anyone may see.
+
+    suspend fun checkUsername(username: String): Result<BaseResponse<UsernameAvailability>, Error> =
+        get(url = "${ApiRoute.PROFILE_PUBLIC.getName()}/check?username=$username")
+
+    suspend fun setUsername(userId: String, request: SetUsernameReq): Result<BaseResponse<User>, Error> =
+        post(url = "${ApiRoute.USERS.getName()}/$userId/username", requestData = request)
+
+    /** A partial patch — null fields are omitted by the Json config, never sent as null. */
+    suspend fun updateProfile(userId: String, request: UpdateProfileReq): Result<BaseResponse<User>, Error> =
+        post(url = "${ApiRoute.USERS.getName()}/$userId", requestData = request)
+
+    suspend fun getPublicProfile(username: String): Result<BaseResponse<PublicUser>, Error> =
+        get(url = "${ApiRoute.PROFILE_PUBLIC.getName()}/$username")
+
+    suspend fun searchPeople(query: String, limit: Int): Result<BaseResponse<List<PublicUser>>, Error> =
+        get(url = "${ApiRoute.PROFILE_PUBLIC.getName()}/search?q=$query&limit=$limit")
+
+    /**
+     * 🖼️ Replaces the old profileImage() stub, which posted an empty form-urlencoded body and could
+     * never work. One round trip: uploads, sets avatarAssetId server-side, and answers with the
+     * updated user — the same User shape login returns.
+     */
+    suspend fun uploadAvatar(file: MediaUpload): Result<BaseResponse<User>, Error> =
+        baseApiCall<BaseResponse<User>, NetworkError> {
+            httpClient.submitFormWithBinaryData(
+                url = ApiRoute.PROFILE.getName(),
+                formData = formData {
+                    append(
+                        key = UPLOAD_FIELD_AVATAR,
+                        value = file.bytes,
+                        headers = Headers.build {
+                            append(HttpHeaders.ContentType, file.mimeType)
+                            append(HttpHeaders.ContentDisposition, "filename=\"${file.fileName}\"")
+                        }
+                    )
+                }
+            )
+        }
+
+    // ── chat ──────────────────────────────────────────────────────────────
+    // 💬 31-Aug-2026: REST is the FALLBACK for everything the socket does. A device behind a proxy
+    //   that blocks websockets still sends and reads history — it just is not pushed to.
+
+    suspend fun listConversations(limit: Int, before: Long? = null): Result<BaseResponse<List<ChatConversationWire>>, Error> {
+        val cursor = before?.takeIf { it > 0 }?.let { "&before=$it" } ?: ""
+        return get(url = "${ApiRoute.CHAT.getName()}/conversations?limit=$limit$cursor")
+    }
+
+    suspend fun openConversation(request: OpenConversationRequest): Result<BaseResponse<ChatConversationWire>, Error> =
+        post(url = "${ApiRoute.CHAT.getName()}/conversations", requestData = request)
+
+    suspend fun getConversation(conversationId: String): Result<BaseResponse<ChatConversationWire>, Error> =
+        get(url = "${ApiRoute.CHAT.getName()}/conversations/$conversationId")
+
+    suspend fun deleteConversation(conversationId: String): Result<BaseResponse<DeleteConversationResponse>, Error> =
+        delete(url = "${ApiRoute.CHAT.getName()}/conversations/$conversationId")
+
+    suspend fun getMessages(conversationId: String, limit: Int, before: Long? = null): Result<BaseResponse<List<ChatMessageWire>>, Error> {
+        val cursor = before?.takeIf { it > 0 }?.let { "&before=$it" } ?: ""
+        return get(url = "${ApiRoute.CHAT.getName()}/conversations/$conversationId/messages?limit=$limit$cursor")
+    }
+
+    suspend fun sendMessage(conversationId: String, request: SendMessageRequest): Result<BaseResponse<ChatMessageWire>, Error> =
+        post(url = "${ApiRoute.CHAT.getName()}/conversations/$conversationId/messages", requestData = request)
+
+    suspend fun deleteMessage(conversationId: String, messageId: String): Result<BaseResponse<ChatMessageWire>, Error> =
+        delete(url = "${ApiRoute.CHAT.getName()}/conversations/$conversationId/messages/$messageId")
+
+    suspend fun markConversationRead(conversationId: String, request: MarkReadRequest): Result<BaseResponse<ReadReceiptWire>, Error> =
+        post(url = "${ApiRoute.CHAT.getName()}/conversations/$conversationId/read", requestData = request)
+
+    suspend fun getChatPeers(query: String?, limit: Int): Result<BaseResponse<List<ChatParticipantWire>>, Error> {
+        val search = query?.takeIf { it.isNotBlank() }?.let { "&q=$it" } ?: ""
+        return get(url = "${ApiRoute.CHAT.getName()}/peers?limit=$limit$search")
+    }
 
     // actual api calls
     private suspend inline fun <reified T> get(

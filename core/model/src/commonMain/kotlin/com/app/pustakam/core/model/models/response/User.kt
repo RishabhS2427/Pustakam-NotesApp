@@ -7,6 +7,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class User(
     val _id : String?,
+    val username : String? = null,
+    val usernameUpdatedAt : Long? = null,
+    val bio : String? = null,
+    val discoverable : Boolean = true,
     val name : String?,
     val phone : String?,
     val email : String?,
@@ -20,3 +24,14 @@ data class User(
     val accessToken : String? = null,
     val refreshToken : String? = null,
 )
+
+/** 🆔 true while the username was assigned by the server and never chosen. */
+fun User.needsUsername(): Boolean = username.isNullOrBlank() || usernameUpdatedAt == null
+
+fun User.handle(): String = username?.takeIf { it.isNotBlank() }?.let { "@$it" } ?: ""
+
+fun User.displayName(): String = name?.takeIf { it.isNotBlank() }
+    ?: username?.takeIf { it.isNotBlank() }
+    ?: "You"
+
+fun User.initial(): String = displayName().trim().firstOrNull()?.uppercase() ?: "?"

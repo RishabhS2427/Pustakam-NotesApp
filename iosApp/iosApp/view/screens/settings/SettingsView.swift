@@ -8,6 +8,8 @@ struct SettingsView: View {
     @State private var readerPrefs = ReaderPrefsAdapter()
     @State private var readingMode: ReadingMode = .page
     @State private var authBridge = AuthBridgeAdapter()
+    // 👤 31-Aug-2026 — the header used to be four hardcoded strings, one of them an email address
+    @StateObject private var profile = ProfileViewModel()
     var body: some View {
         @Bindable var themeManager = themeManager
 
@@ -15,10 +17,12 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
 
                 SettingsProfileHeader(
-                    initial: "R",
-                    name: "Rishabh S",
-                    subtitle: "rishabhshri2795@gmail.com · 4 devices",
-                    badge: "PRO"
+                    initial: profile.initial,
+                    name: profile.user == nil ? "Your profile" : profile.displayName,
+                    subtitle: profileSubtitle,
+                    badge: profileBadge,
+                    avatarUrl: profile.avatarUrl,
+                    onTap: { router.navigate(to: .Profile) }
                 )
 
                 // 🎨 Appearance — the only live section
@@ -93,6 +97,21 @@ struct SettingsView: View {
         .background(palette.background.ignoresSafeArea())
         // 📖 23-Jul-2026 — restore the persisted pick, and follow changes made in the reader
         .onAppear { readerPrefs.observeReadingMode { readingMode = $0 } }
+        .task { profile.load() }
+    }
+
+    /// 🔒 The handle, never the email. Email and phone are login credentials from 31-Aug-2026 and
+    /// the server no longer returns anyone else's; rendering our own here would still teach the
+    /// wrong habit, and the handle is what a person actually shares.
+    private var profileSubtitle: String {
+        guard profile.user != nil else { return "Tap to set up" }
+        return profile.handle.isEmpty ? "Tap to pick a username" : profile.handle
+    }
+
+    /// 🆔 the nudge replaces the badge until a real handle exists.
+    private var profileBadge: String? {
+        guard let user = profile.user else { return nil }
+        return (user.username ?? "").isEmpty ? "SET UP" : nil
     }
 
     // 🎨 tells the user what the current pick actually does
@@ -232,21 +251,28 @@ struct SettingsProfileHeader: View {
     let name: String
     let subtitle: String
     let badge: String?
+    var avatarUrl: String? = nil
+    var onTap: () -> Void = {}
 
     @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: Theme.Spacing.lg) {
 
-            Circle()
-                .fill(LinearGradient(colors: [Theme.Colors.indigo, Theme.Colors.forest],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+            // 🖼️ the gradient initial is the placeholder, so a user with no picture still reads as themselves
+            if let avatarUrl, !avatarUrl.isEmpty, let url = URL(string: avatarUrl) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        gradientInitial
+                    }
+                }
                 .frame(width: 54, height: 54)
-                .overlay(
-                    Text(initial)
-                        .font(Theme.Fonts.displayL)
-                        .foregroundStyle(.white)
-                )
+                .clipShape(Circle())
+            } else {
+                gradientInitial
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(name)
@@ -283,6 +309,20 @@ struct SettingsProfileHeader: View {
         )
         .shadow(color: Theme.Elevation.card,
                 radius: Theme.Elevation.cardRadius, x: 0, y: Theme.Elevation.cardY)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
+    }
+
+    private var gradientInitial: some View {
+        Circle()
+            .fill(LinearGradient(colors: [Theme.Colors.indigo, Theme.Colors.forest],
+                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: 54, height: 54)
+            .overlay(
+                Text(initial)
+                    .font(Theme.Fonts.displayL)
+                    .foregroundStyle(.white)
+            )
     }
 }
 

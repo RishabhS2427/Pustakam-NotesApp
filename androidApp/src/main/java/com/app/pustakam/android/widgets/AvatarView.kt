@@ -18,17 +18,22 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.app.pustakam.android.MyApplicationTheme
 import com.app.pustakam.android.R
 
+// 🔧 31-Aug-2026 — .size(200.dp) used to be applied AFTER the caller's modifier, so
+//   CircleIconLoad(modifier = Modifier.size(96.dp)) still rendered at 200dp. Size is a parameter
+//   now, and .then(modifier) comes last so a caller can genuinely override.
 @Composable
 fun CircleIconLoad(url: String? = null,
                    modifier: Modifier = Modifier,
+                   size: Dp = 200.dp,
                    placeHolderDrawable: Int = R.drawable.avatar,
-                   onClick :  ()-> Unit ) {
+                   onClick :  ()-> Unit = {} ) {
     AsyncImage(
         model = ImageRequest.Builder(LocalContext.current)
             .data(url)
@@ -37,17 +42,15 @@ fun CircleIconLoad(url: String? = null,
         placeholder = painterResource(placeHolderDrawable),
         contentDescription = null,
         contentScale = ContentScale.Crop,
-        modifier = modifier
-            .border(
-                shape = RoundedCornerShape(50),
-                border = BorderStroke(
-                    4.dp,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-            )
+        modifier = Modifier
+            .size(size)
             .clip(CircleShape)
-            .size(200.dp)
+            .border(
+                border = BorderStroke(4.dp, color = MaterialTheme.colorScheme.secondary),
+                shape = CircleShape
+            )
             .clickable { onClick() }
+            .then(modifier)
     )
 }
 

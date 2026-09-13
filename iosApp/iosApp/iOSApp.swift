@@ -58,6 +58,12 @@ private struct AppRootView: View {
                         // 🎨 09-Aug-2026: free canvas editor over the same note
                         case .MasterEditor(let noteId):
                             MasterEditorScreen(noteId: noteId)
+                        // 💬 31-Aug-2026 chat
+                        case .ChatThread(let conversationId, let title):
+                            ChatScreenView(conversationId: conversationId, title: title)
+                        // 👤 31-Aug-2026 profile — this case existed in Router but was never
+                        //   handled, so navigating to it silently showed the login screen
+                        case .Profile: ProfileView()
                         default: LoginView()
                     }
                 }

@@ -17,10 +17,16 @@ class DeleteUserUseCase : AuthBaseUseCase() {
     suspend operator fun invoke() = authRepository.deleteUser()
 }
 
+// 🗑️ 31-Aug-2026 — SUPERSEDED by domain/profile/UpdateProfileUseCase. It posts a whole User
+//   at a .strict() schema and would 422; zero call sites, so nothing ever hit that.
 class UpdateUserUseCase : AuthBaseUseCase() {
     suspend operator fun invoke(user: User) = authRepository.updateUser(user)
 }
 
+// 🗑️ 31-Aug-2026 — SUPERSEDED by domain/profile/GetMyProfileUseCase. Zero call sites, and the
+//   parameter is typed User rather than String and never read, so it can only ever fetch the
+//   CURRENT user. Kept rather than deleted per the project's delete-nothing rule; do not
+//   build on it.
 class ReadUserUseCase : AuthBaseUseCase() {
     suspend operator fun invoke(userId: User) = authRepository.getUser("")
 }

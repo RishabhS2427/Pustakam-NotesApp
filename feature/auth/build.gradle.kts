@@ -34,6 +34,9 @@ kotlin {
                 api(projects.core.model)
                 api(projects.core.data)
                 api(projects.core.database)
+                // 👤 31-Aug-2026 profile: MediaUpload is in AuthBridge.uploadAvatar's signature. It
+                //   resolved transitively through :core:data before; naming it is the module's own rule.
+                api(projects.core.network)
                 // 🔧 30-Jul-2026 02:10 — the bridges are KoinComponents -> supertype -> api
                 api(libs.koin)
                 implementation(libs.kotlinx.coroutines.core)

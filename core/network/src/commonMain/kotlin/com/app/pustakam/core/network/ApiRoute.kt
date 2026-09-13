@@ -32,7 +32,16 @@ package com.app.pustakam.core.network
              },
      USERS{
          override fun getName(): String = "$baseUrl/users"
-         };
+     },
+     // 💬 31-Aug-2026 chat: /chat/conversations, /chat/conversations/{id}/messages, /chat/peers
+     CHAT {
+         override fun getName(): String = "$baseUrl/chat"
+     },
+     // 🆔 31-Aug-2026 profile: /u/check, /u/search, /u/{username}. Short on purpose — it is
+     //   also the deep-link shape, pustakam://u/<username>.
+     PROFILE_PUBLIC {
+         override fun getName(): String = "$baseUrl/u"
+     };
 
      val baseUrl = getUrl()
      abstract fun getName(): String

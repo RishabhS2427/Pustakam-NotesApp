@@ -27,4 +27,5 @@ include(":core:data")
 include(":core:network")
 include(":feature:auth")
 include(":feature:notes")
+include(":feature:chat")
 

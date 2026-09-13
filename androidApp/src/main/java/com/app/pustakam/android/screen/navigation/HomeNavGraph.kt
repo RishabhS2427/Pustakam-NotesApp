@@ -26,7 +26,10 @@ import com.app.pustakam.android.screen.masterEditor.MasterEditorScreen
 import com.app.pustakam.android.screen.noteEditor.NoteEditorScreen
 import com.app.pustakam.android.screen.noteEditor.NoteEditorViewModel
 import com.app.pustakam.android.screen.notes.list.NotesView
+import com.app.pustakam.android.screen.chat.ChatListScreen
+import com.app.pustakam.android.screen.chat.ChatScreen
 import com.app.pustakam.android.screen.notification.NotificationView
+import com.app.pustakam.android.screen.profile.ProfileScreen
 import com.app.pustakam.android.screen.search.SearchView
 import com.app.pustakam.android.screen.settings.SettingsScreen
 import com.app.pustakam.core.common.util.ContentType
@@ -52,12 +55,46 @@ fun NavGraphBuilder.HomeNavGraph(navController: PustakmNavController){
         ) {
             NotificationView(onNavigate = {})
         }
+        // 💬 31-Aug-2026 chat: the inbox, and one full-screen thread
+        composable(
+            route = Route.Chat
+        ) {
+            ChatListScreen(onOpenConversation = { conversationId ->
+                navController.navigateTo(Route.ChatThread + "/$conversationId")
+            })
+        }
+        composable(
+            route = Route.ChatThread + "/{conversationId}"
+        ) { backStackEntry ->
+            val conversationId = backStackEntry.arguments?.getString("conversationId") ?: ""
+            val imageViewModel: ImageDataViewModel = viewModel(viewModelStoreOwner = LocalContext.current as ComponentActivity)
+            ChatScreen(
+                conversationId = conversationId,
+                onBack = navController::upPress,
+                // 🧩 DRY: chat media opens in the SAME previewers the notes use
+                onOpenMediaPreview = { media, route ->
+                    when (route) {
+                        Route.ImagePreview, Route.VideoPreview -> {
+                            imageViewModel.onSetMediaToPreview(media.getMediaUrl(), media.type, mediaId = media.id)
+                            navController.navigateTo(route)
+                        }
+                        else -> navController.navigateTo(Route.BookReader + "/$conversationId?contentId=${media.id}")
+                    }
+                },
+            )
+        }
         composable(
             route = Route.Search
         ) {
             SearchView(onNavigateNote = { noteId ->
                 navController.navigateTo(Route.NotesEditor + "/${noteId}")
             })
+        }
+        // 👤 31-Aug-2026 profile
+        composable(
+            route = Route.Profile
+        ) {
+            ProfileScreen(onBack = navController::upPress)
         }
         composable(
             route = Route.Settings

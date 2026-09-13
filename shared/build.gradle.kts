@@ -40,6 +40,7 @@ kotlin {
             export(projects.core.filesys)
             export(projects.feature.auth)
             export(projects.feature.notes)
+            export(projects.feature.chat)
         }
     }
 
@@ -55,6 +56,7 @@ kotlin {
             api(projects.core.filesys)
             api(projects.feature.auth)
             api(projects.feature.notes)
+            api(projects.feature.chat)
             // 🔧 30-Jul-2026 02:10 — KoinAppDeclaration is in initKoin()'s signature, which Swift calls
             api(libs.koin)
             implementation(libs.kotlinx.coroutines.core)

@@ -11,3 +11,5 @@ class MediaUpload(
 
 // 🖼️ the multipart field name multer is configured for: multerConfig.array(UPLOAD_FIELD.FILES, ...)
 const val UPLOAD_FIELD_FILES = "files"
+// 🖼️ POST /profile uses multer.single("avatar") — a different field name than /images
+const val UPLOAD_FIELD_AVATAR = "avatar"

@@ -2,6 +2,13 @@ package com.app.pustakam.feature.auth.di
 
 import com.app.pustakam.feature.auth.domain.repository.AuthRepository
 import com.app.pustakam.feature.auth.domain.repository.IAuthRepository
+import com.app.pustakam.feature.auth.domain.profile.CheckUsernameUseCase
+import com.app.pustakam.feature.auth.domain.profile.GetMyProfileUseCase
+import com.app.pustakam.feature.auth.domain.profile.GetPublicProfileUseCase
+import com.app.pustakam.feature.auth.domain.profile.SearchPeopleUseCase
+import com.app.pustakam.feature.auth.domain.profile.SetUsernameUseCase
+import com.app.pustakam.feature.auth.domain.profile.UpdateProfileUseCase
+import com.app.pustakam.feature.auth.domain.profile.UploadAvatarUseCase
 import com.app.pustakam.feature.auth.domain.usecase.AppUserCase
 import com.app.pustakam.feature.auth.domain.usecase.DeleteUserUseCase
 import com.app.pustakam.feature.auth.domain.usecase.LoginUseCase
@@ -23,4 +30,13 @@ fun authModule(): Module = module {
     factory<DeleteUserUseCase> { DeleteUserUseCase() }
     factory<UpdateUserUseCase> { UpdateUserUseCase() }
     factory<ReadUserUseCase> { ReadUserUseCase() }
+
+    // 👤 31-Aug-2026 profile
+    factory<GetMyProfileUseCase> { GetMyProfileUseCase() }
+    factory<UpdateProfileUseCase> { UpdateProfileUseCase() }
+    factory<UploadAvatarUseCase> { UploadAvatarUseCase() }
+    factory<SetUsernameUseCase> { SetUsernameUseCase() }
+    factory<CheckUsernameUseCase> { CheckUsernameUseCase() }
+    factory<GetPublicProfileUseCase> { GetPublicProfileUseCase() }
+    factory<SearchPeopleUseCase> { SearchPeopleUseCase() }
 }

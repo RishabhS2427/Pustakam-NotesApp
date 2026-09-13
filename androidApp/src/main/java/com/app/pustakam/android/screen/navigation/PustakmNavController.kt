@@ -29,8 +29,11 @@ object Route {
     const val ImagePreview = "IMAGE_PREVIEW"
     const val VideoPreview = "VIDEO_PREVIEW"
     const val Settings = "SETTINGS"
-    const val BookReader = "BOOK_READER"   // 🔧 18-Jul-2026: page-flip book reader
-    const val NoteBookReader = "NOTEBOOK_READER"   // 🔧 18-Jul-2026: page-flip book reader
+    const val BookReader = "BOOK_READER"
+    const val NoteBookReader = "NOTEBOOK_READER"
+    const val Chat = "CHAT"
+    const val ChatThread = "CHAT_THREAD"
+    const val Profile = "PROFILE"
 }
 
 /** Screens that belong to a capture flow rather than to a place the user was working. */
@@ -46,15 +49,14 @@ class PustakmNavController(
     val navigationScreen = listOf(
         Screen.HomeScreen.NotesScreen,
         Screen.HomeScreen.SearchScreen,
+        // 💬 31-Aug-2026: chat sits between search and notifications
+        Screen.HomeScreen.ChatScreen,
         Screen.HomeScreen.NotificationScreen,
         Screen.HomeScreen.SettingsScreen
     )
     private val currentChrome
         get() = NavRouteRegistry.chromeFor(navController.currentBackStackEntry?.destination?.route)
-
-    val shouldShowBottomBar get() = currentChrome.showsBottomBar
     val shouldShowTopBar get() = currentChrome.showsTopBar
-    val shouldShowFloatingButton get() = currentChrome.showsFab
 
     fun upPress() {
         navController.navigateUp()

@@ -13,7 +13,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.app.pustakam.android.fileimport.IncomingShare
+import androidx.lifecycle.Lifecycle
 import com.app.pustakam.android.screen.AppViewModel
+import com.app.pustakam.android.screen.OnLifecycleEvent
 import com.app.pustakam.android.screen.navigation.NavRouteRegistry.buildAll
 
 @Composable
@@ -25,6 +27,16 @@ fun AppNavGraph(
     val isAuthenticated = appViewModel.isAuthenticated
         .collectAsStateWithLifecycle(initialValue = false).value
     val startRoute = if (isAuthenticated) Route.Home else Route.Authentication
+
+    // 💬 31-Aug-2026: the chat socket follows the session, not the screen
+    LaunchedEffect(isAuthenticated) { appViewModel.onAuthenticationChanged(isAuthenticated) }
+    OnLifecycleEvent { _, event ->
+        when (event) {
+            Lifecycle.Event.ON_RESUME -> appViewModel.onForeground(true)
+            Lifecycle.Event.ON_PAUSE -> appViewModel.onForeground(false)
+            else -> Unit
+        }
+    }
 
     val sharedUris = IncomingShare.uris.collectAsStateWithLifecycle().value
     LaunchedEffect(sharedUris, isAuthenticated) {

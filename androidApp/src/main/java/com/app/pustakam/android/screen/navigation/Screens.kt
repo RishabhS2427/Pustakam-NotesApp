@@ -2,6 +2,7 @@ package com.app.pustakam.android.screen.navigation
 
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -35,6 +36,11 @@ sealed class Screen(val route: String) {
 
         data object SearchScreen : BottomNavigationItem(
             "Search", selectedIcon = Icons.Default.Search, unselectedIcon = Icons.Default.Search, hasNotification = false, route = Route.Search
+        )
+
+        // 💬 31-Aug-2026 chat
+        data object ChatScreen : BottomNavigationItem(
+            "Chat", selectedIcon = Icons.AutoMirrored.Filled.Chat, unselectedIcon = Icons.AutoMirrored.Filled.Chat, hasNotification = false, route = Route.Chat
         )
 
         data object NotificationScreen : BottomNavigationItem(
