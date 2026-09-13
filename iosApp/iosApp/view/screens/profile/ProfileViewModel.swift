@@ -36,13 +36,13 @@ final class ProfileViewModel: ObservableObject {
     }
 
     /// 🆔 true while the name was assigned by the server — the prompt to pick a real one.
-    var shouldPromptForUsername: Bool { user.map { UserKt.needsUsername($0) } ?? false }
+    var shouldPromptForUsername: Bool { user?.needsUsername() ?? false }
 
     var isDiscoverable: Bool { user?.discoverable ?? true }
 
-    var displayName: String { user.map { UserKt.displayName($0) } ?? "" }
+    var displayName: String { user?.displayName() ?? "" }
 
-    var initial: String { user.map { UserKt.initial($0) } ?? "?" }
+    var initial: String { user?.initial() ?? "?" }
 
     var avatarUrl: String? { user?.avatarUrl.absoluteMediaUrl }
 

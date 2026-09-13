@@ -41,7 +41,6 @@ import com.app.pustakam.android.theme.typography
 import com.app.pustakam.android.widgets.CircleIconLoad
 import com.app.pustakam.android.widgets.LoadingUI
 import com.app.pustakam.android.widgets.POutLinedTextFieldColors
-import com.app.pustakam.core.model.models.response.displayName
 import com.app.pustakam.core.network.toAbsoluteMediaUrl
 
 private const val BIO_MAX_LENGTH = 160

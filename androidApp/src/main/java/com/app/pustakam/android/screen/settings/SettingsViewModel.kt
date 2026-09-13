@@ -9,9 +9,6 @@ import com.app.pustakam.android.theme.ThemeMode
 import com.app.pustakam.core.database.localdb.preferences.IAppPreferences
 import com.app.pustakam.core.model.models.BaseResponse
 import com.app.pustakam.core.model.models.response.User
-import com.app.pustakam.core.model.models.response.displayName
-import com.app.pustakam.core.model.models.response.handle
-import com.app.pustakam.core.model.models.response.initial
 import com.app.pustakam.feature.auth.domain.profile.GetMyProfileUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow

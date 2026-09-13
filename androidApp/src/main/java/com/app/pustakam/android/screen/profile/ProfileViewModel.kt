@@ -11,7 +11,6 @@ import com.app.pustakam.core.model.models.BaseResponse
 import com.app.pustakam.core.model.models.profile.UpdateProfileReq
 import com.app.pustakam.core.model.models.profile.UsernameAvailability
 import com.app.pustakam.core.model.models.response.User
-import com.app.pustakam.core.model.models.response.needsUsername
 import com.app.pustakam.core.model.validation.UsernameRules
 import com.app.pustakam.feature.auth.domain.profile.CheckUsernameUseCase
 import com.app.pustakam.feature.auth.domain.profile.GetMyProfileUseCase
