@@ -144,7 +144,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun `the inbox search filters conversations and peers by what is on screen`() {
+    fun `the inbox search filters the conversations already on the device`() {
         val state = ChatListState(
             conversations = listOf(
                 ChatConversation(id = "c1", title = "Design review"),
@@ -152,9 +152,33 @@ class ChatReducerTest {
             ),
         )
 
-        val filtered = ChatReducer.reduceList(state, ChatListIntent.QueryChanged("desi"))
+        val filtered = ChatReducer.reduceList(state, ChatListIntent.InboxQueryChanged("desi"))
 
         assertEquals(listOf("c1"), filtered.visibleConversations.map { it.id })
+    }
+
+    /**
+     * 🔧 17-Sep-2026 — these were ONE field. Once the picker's box started driving a server-side
+     * /u/search, typing in the inbox filter fired user lookups at the server, and opening the
+     * picker wiped whatever the inbox was filtered by.
+     */
+    @Test
+    fun `the inbox filter and the people search do not touch each other`() {
+        val state = ChatListState(
+            conversations = listOf(
+                ChatConversation(id = "c1", title = "Design review"),
+                ChatConversation(id = "c2", title = "Grocery list"),
+            ),
+            inboxQuery = "desi",
+        )
+
+        val searching = ChatReducer.reduceList(state, ChatListIntent.QueryChanged("rish"))
+        assertEquals("desi", searching.inboxQuery, "searching for people leaves the inbox filter alone")
+        assertEquals(listOf("c1"), searching.visibleConversations.map { it.id })
+
+        val opened = ChatReducer.reduceList(searching, ChatListIntent.PeerPickerToggled(true))
+        assertEquals("desi", opened.inboxQuery, "opening the picker must not wipe the inbox filter")
+        assertEquals("", opened.query)
     }
 
     @Test
@@ -181,7 +205,7 @@ class ChatReducerTest {
         assertEquals("", closed.query)
         assertEquals(emptyList(), closed.peers)
         assertFalse(closed.isSearchingPeers)
-        assertEquals(listOf("c1"), closed.visibleConversations.map { it.id }, "the inbox is unfiltered again")
+        assertEquals(listOf("c1"), closed.visibleConversations.map { it.id })
     }
 
     /**

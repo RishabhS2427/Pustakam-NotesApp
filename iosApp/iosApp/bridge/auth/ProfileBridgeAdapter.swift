@@ -33,6 +33,11 @@ final class ProfileBridgeAdapter {
         bridge.localUsernameRejection(username: username)
     }
 
+    /// 🆔 the one shared rule that decides whether Save is alive — see UsernameRules.canSubmit
+    func canSubmitUsername(_ draft: String, current: String?, knownUnavailable: Bool) -> Bool {
+        bridge.canSubmitUsername(draft: draft, current: current, knownUnavailable: knownUnavailable)
+    }
+
     func checkUsername(_ username: String, onState: @escaping (UiState<UsernameAvailability>) -> Void) {
         closeables.append(bridge.checkUsername(
             username: username,

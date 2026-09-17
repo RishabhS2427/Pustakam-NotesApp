@@ -94,6 +94,8 @@ object ChatReducer {
 
         is ChatListIntent.QueryChanged -> state.copy(query = intent.query)
 
+        is ChatListIntent.InboxQueryChanged -> state.copy(inboxQuery = intent.query)
+
         // 🔧 31-Aug-2026 — the query is cleared on CLOSE too. It used to survive, which left the
         //   inbox silently filtered by whatever was typed in the picker, with no field to clear.
         is ChatListIntent.PeerPickerToggled -> state.copy(

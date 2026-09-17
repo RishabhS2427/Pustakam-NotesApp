@@ -57,6 +57,8 @@ sealed interface ChatListIntent {
 
     data class QueryChanged(val query: String) : ChatListIntent
 
+    data class InboxQueryChanged(val query: String) : ChatListIntent
+
     data class PeerPickerToggled(val isOpen: Boolean) : ChatListIntent
 
     data class UnreadChanged(val total: Int) : ChatListIntent

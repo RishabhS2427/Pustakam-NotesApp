@@ -8,7 +8,7 @@ private let peerSearchDebounceSeconds: TimeInterval = 0.4
 final class ChatListViewModel: ObservableObject {
 
     @Published private(set) var state = ChatListState(
-        conversations: [], peers: [], query: "", connection: .disconnected,
+        conversations: [], peers: [], query: "", inboxQuery: "", connection: .disconnected,
         totalUnread: 0, isLoading: false, isRefreshing: false, isPickingPeer: false,
         isSearchingPeers: false, error: nil
     )
@@ -80,6 +80,9 @@ final class ChatListViewModel: ObservableObject {
         peerSearchWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + peerSearchDebounceSeconds, execute: work)
     }
+
+    /// The inbox filter is local and instant — it never touches the network.
+    func onInboxQueryChange(_ query: String) { emit(ChatListIntentInboxQueryChanged(query: query)) }
 
     func openPeerPicker() { emit(ChatListIntentPeerPickerToggled(isOpen: true)) }
 

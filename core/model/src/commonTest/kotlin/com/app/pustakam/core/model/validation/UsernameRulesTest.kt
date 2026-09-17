@@ -84,4 +84,42 @@ class UsernameRulesTest {
         assertFalse(UsernameRules.isWorthChecking("admin"))
         assertTrue(UsernameRules.isWorthChecking("rishabh"))
     }
+
+    // ── canSubmit — the rule behind the Save button on both platforms ─────────────
+
+    /**
+     * 🔧 17-Sep-2026 — THE regression. Save used to require a successful /u/check, so one 429 from
+     * usernameCheckLimiter left the button dead forever with no hint on screen. A missing answer
+     * must never block submission: the server owns uniqueness and answers 409 if it is taken.
+     */
+    @Test
+    fun `a valid handle can be submitted before any availability answer arrives`() {
+        assertTrue(UsernameRules.canSubmit("rishabh", current = null, knownUnavailable = false))
+        assertTrue(UsernameRules.canSubmit("rishabh", current = "oldname", knownUnavailable = false))
+    }
+
+    @Test
+    fun `only a positive no from the server blocks submission`() {
+        assertFalse(UsernameRules.canSubmit("rishabh", current = null, knownUnavailable = true))
+    }
+
+    @Test
+    fun `locally hopeless input is never submittable`() {
+        assertFalse(UsernameRules.canSubmit("ab", current = null, knownUnavailable = false))
+        assertFalse(UsernameRules.canSubmit("admin", current = null, knownUnavailable = false))
+        assertFalse(UsernameRules.canSubmit("", current = null, knownUnavailable = false))
+        assertFalse(UsernameRules.canSubmit(null, current = null, knownUnavailable = false))
+    }
+
+    /**
+     * The stored username keeps its display case, so both sides must be canonicalised — otherwise
+     * "Rishabh" looks like a change from "Rishabh" and burns a rename off the 30-day cooldown.
+     */
+    @Test
+    fun `re-submitting the same handle in a different case is not a change`() {
+        assertFalse(UsernameRules.canSubmit("Rishabh", current = "Rishabh", knownUnavailable = false))
+        assertFalse(UsernameRules.canSubmit("RISHABH", current = "rishabh", knownUnavailable = false))
+        assertFalse(UsernameRules.canSubmit("  rishabh  ", current = "Rishabh", knownUnavailable = false))
+        assertTrue(UsernameRules.canSubmit("rishabh2", current = "Rishabh", knownUnavailable = false))
+    }
 }

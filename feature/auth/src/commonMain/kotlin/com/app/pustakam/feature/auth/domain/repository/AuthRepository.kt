@@ -2,6 +2,7 @@ package com.app.pustakam.feature.auth.domain.repository
 
 import com.app.pustakam.core.common.extensions.normalizedPhone
 import com.app.pustakam.core.common.util.Error
+import com.app.pustakam.core.common.util.NetworkError
 import com.app.pustakam.core.common.util.Result
 import com.app.pustakam.core.common.util.onSuccess
 import com.app.pustakam.core.data.base.BaseRepository
@@ -58,8 +59,11 @@ internal class AuthRepository : BaseRepository(), IAuthRepository {
         apiClient.updateUser(user)
 
     // pass empty string to get current user
-    override suspend fun getUser(userId: String): Result<BaseResponse<User>, Error> =
-        apiClient.getUser(userId.ifEmpty { session.userId })
+    override suspend fun getUser(userId: String): Result<BaseResponse<User>, Error> {
+        val id = userId.ifEmpty { session.userId }
+        if (id.isBlank()) return Result.Error(NetworkError.SESSION_EXPIRED)
+        return apiClient.getUser(id)
+    }
 
     override suspend fun deleteUser(): Result<BaseResponse<User>, Error> =
         apiClient.deleteUser(session.userId)
@@ -68,11 +72,20 @@ internal class AuthRepository : BaseRepository(), IAuthRepository {
         apiClient.uploadAvatar(file)
 
     override suspend fun updateProfile(request: UpdateProfileReq): Result<BaseResponse<User>, Error> =
-        apiClient.updateProfile(session.userId, request)
+        requireSession()?.let { Result.Error(it) } ?: apiClient.updateProfile(session.userId, request)
+
+    /**
+     * 🔧 17-Sep-2026 — these calls build a URL out of session.userId. A blank id silently produces
+     * `/users//username`, which the server answers 404 "No Record found" — a message that sends you
+     * hunting for a missing route when the real problem is that there is no session. Say that.
+     */
+    private fun requireSession(): NetworkError? =
+        if (session.userId.isBlank()) NetworkError.SESSION_EXPIRED else null
 
     /** 🆔 canonicalised here so both platforms send the same thing — same place as Login.canonical(). */
     override suspend fun setUsername(username: String): Result<BaseResponse<User>, Error> =
-        apiClient.setUsername(session.userId, SetUsernameReq(UsernameRules.canonical(username)))
+        requireSession()?.let { Result.Error(it) }
+            ?: apiClient.setUsername(session.userId, SetUsernameReq(UsernameRules.canonical(username)))
 
     override suspend fun checkUsername(username: String): Result<BaseResponse<UsernameAvailability>, Error> =
         apiClient.checkUsername(UsernameRules.canonical(username))

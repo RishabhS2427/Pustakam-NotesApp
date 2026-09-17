@@ -54,7 +54,16 @@ data class ChatState(
 data class ChatListState(
     val conversations: List<ChatConversation> = emptyList(),
     val peers: List<ChatParticipant> = emptyList(),
+    /** What is typed in the PEOPLE PICKER. Drives a server-side search. */
     val query: String = "",
+    /**
+     * 🔧 17-Sep-2026 — what is typed in the INBOX search field, filtered locally.
+     *
+     * These were one field. Since the picker's box started driving a /u/search request, typing in
+     * the inbox search fired user lookups at the server, and opening the picker wiped the inbox
+     * filter. Two questions, two fields.
+     */
+    val inboxQuery: String = "",
     val connection: ChatConnectionState = ChatConnectionState.DISCONNECTED,
     val totalUnread: Int = 0,
     val isLoading: Boolean = false,
@@ -65,8 +74,8 @@ data class ChatListState(
     val error: String? = null,
 ) {
     val visibleConversations: List<ChatConversation>
-        get() = if (query.isBlank()) conversations
-        else conversations.filter { it.displayTitle().contains(query, ignoreCase = true) }
+        get() = if (inboxQuery.isBlank()) conversations
+        else conversations.filter { it.displayTitle().contains(inboxQuery, ignoreCase = true) }
 
     /**
      * 🆔 31-Aug-2026 — NOT filtered locally any more. `peers` is now the answer to a server-side

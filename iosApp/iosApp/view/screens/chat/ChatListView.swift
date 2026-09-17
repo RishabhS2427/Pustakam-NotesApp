@@ -13,6 +13,49 @@ struct ChatListView: View {
     private var state: ChatListState { viewModel.state }
 
     var body: some View {
+        // 🔧 17-Sep-2026 — the "new chat" control is a button floating over the list, not a
+        //   ToolbarItem. This view is a TAB inside HomeView's TabView, and the navigation bar
+        //   belongs to HomeView, not to the tab — so a .navigationBarTrailing item declared here
+        //   never appeared and there was no way to start a conversation on iOS at all. Android
+        //   solves it with a FAB over the content for the same reason; this now matches it.
+        ZStack(alignment: .bottomTrailing) {
+            inbox
+            newChatButton
+        }
+        .background(Theme.Colors.background)
+        .sheet(isPresented: Binding(
+            get: { state.isPickingPeer },
+            set: { if !$0 { viewModel.closePeerPicker() } }
+        )) {
+            peerPicker
+        }
+        .onAppear { viewModel.load() }
+        .onChange(of: scenePhase) { _, phase in viewModel.onForeground(phase == .active) }
+        // Opening a new conversation navigates once, then the signal is consumed so reopening
+        // the inbox does not jump straight back into that thread.
+        .onChange(of: viewModel.openedConversationId) { _, opened in
+            guard let opened else { return }
+            router.navigate(to: .ChatThread(conversationId: opened, title: "Chat"))
+            viewModel.openedConversationId = nil
+        }
+    }
+
+    private var newChatButton: some View {
+        Button { viewModel.openPeerPicker() } label: {
+            Label("New chat", systemImage: "square.and.pencil")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.Colors.ivory)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .background(palette.accent)
+                .clipShape(Capsule())
+                .shadow(color: Theme.Elevation.fab, radius: Theme.Elevation.fabRadius,
+                        x: 0, y: Theme.Elevation.fabY)
+        }
+        .padding(16)
+    }
+
+    private var inbox: some View {
         Group {
             if state.isLoading && state.conversations.isEmpty {
                 LoadingUI()
@@ -37,30 +80,10 @@ struct ChatListView: View {
                 .refreshable { viewModel.refresh() }
             }
         }
-        .background(Theme.Colors.background)
-        .searchable(text: Binding(get: { state.query }, set: viewModel.onQueryChange), prompt: "Search chats")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button { viewModel.openPeerPicker() } label: {
-                    Image(systemName: "square.and.pencil").foregroundColor(palette.accent)
-                }
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { state.isPickingPeer },
-            set: { if !$0 { viewModel.closePeerPicker() } }
-        )) {
-            peerPicker
-        }
-        .onAppear { viewModel.load() }
-        .onChange(of: scenePhase) { _, phase in viewModel.onForeground(phase == .active) }
-        // Opening a new conversation navigates once, then the signal is consumed so reopening
-        // the inbox does not jump straight back into that thread.
-        .onChange(of: viewModel.openedConversationId) { _, opened in
-            guard let opened else { return }
-            router.navigate(to: .ChatThread(conversationId: opened, title: "Chat"))
-            viewModel.openedConversationId = nil
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // filters the conversations already on the device — separate from the people search
+        .searchable(text: Binding(get: { state.inboxQuery }, set: viewModel.onInboxQueryChange),
+                    prompt: "Search chats")
     }
 
     private var peerPicker: some View {

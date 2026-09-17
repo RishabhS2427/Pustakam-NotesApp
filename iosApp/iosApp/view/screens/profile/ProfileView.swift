@@ -10,6 +10,8 @@ struct ProfileView: View {
 
     @Environment(\.palette) private var palette
     @StateObject private var viewModel = ProfileViewModel()
+    // 👇 the Identity summary row jumps to the field that actually edits the name
+    @FocusState private var nameFocused: Bool
 
     var onPickAvatar: () -> Void = {}
 
@@ -53,7 +55,8 @@ struct ProfileView: View {
                         SettingsRow(icon: "person.text.rectangle", tint: Theme.Colors.copper,
                                     title: "Display name",
                                     value: viewModel.draftName.isEmpty ? "Not set" : viewModel.draftName,
-                                    isLast: true)
+                                    isLast: true,
+                                    onTap: { nameFocused = true })
                     }
                 }
 
@@ -62,6 +65,7 @@ struct ProfileView: View {
                         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                             TextField("Name", text: $viewModel.draftName)
                                 .textFieldStyle(OutlineTextfieldStyle())
+                                .focused($nameFocused)
 
                             TextField("Bio", text: $viewModel.draftBio, axis: .vertical)
                                 .lineLimit(3, reservesSpace: true)
@@ -119,18 +123,8 @@ struct ProfileView: View {
             if needsOne && !viewModel.isEditingUsername { viewModel.openUsernameEditor() }
         }
         .sheet(isPresented: $viewModel.isEditingUsername, onDismiss: { viewModel.closeUsernameEditor() }) {
-            UsernameSheetView(
-                username: $viewModel.draftUsername,
-                hint: viewModel.usernameHint,
-                isAvailable: viewModel.isUsernameAvailable,
-                isChecking: viewModel.isCheckingUsername,
-                suggestions: viewModel.suggestions,
-                canSave: viewModel.canSaveUsername,
-                onUsernameChange: { viewModel.onUsernameChange($0) },
-                onPickSuggestion: { viewModel.onUsernameChange($0) },
-                onSave: { viewModel.saveUsername() }
-            )
-            .presentationDetents([.medium])
+            UsernameSheetView(viewModel: viewModel)
+                .presentationDetents([.medium])
         }
     }
 

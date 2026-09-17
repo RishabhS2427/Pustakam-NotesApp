@@ -28,6 +28,9 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -60,6 +63,8 @@ fun ProfileScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState()
+    // 👇 the Identity summary row jumps to the field that actually edits the name
+    val nameFocus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) { viewModel.load() }
 
@@ -145,7 +150,7 @@ fun ProfileScreen(
                         tint = colorScheme.secondary,
                         title = "Display name",
                         value = state.draftName.ifBlank { "Not set" },
-                        onClick = {},
+                        onClick = { nameFocus.requestFocus() },
                         isLast = true,
                     )
                 }
@@ -161,7 +166,7 @@ fun ProfileScreen(
                             singleLine = true,
                             colors = POutLinedTextFieldColors(),
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().focusRequester(nameFocus),
                         )
                         OutlinedTextField(
                             value = state.draftBio,
@@ -209,9 +214,10 @@ fun ProfileScreen(
                 username = state.draftUsername,
                 hint = state.usernameHint,
                 isAvailable = state.availability?.available == true,
-                isChecking = state.isCheckingUsername,
+                isNeutral = state.usernameHintIsNeutral,
                 suggestions = state.availability?.suggestions.orEmpty(),
                 canSave = state.canSaveUsername,
+                error = state.error,
                 onUsernameChange = viewModel::onUsernameChange,
                 onPickSuggestion = viewModel::onUsernameChange,
                 onSave = viewModel::saveUsername,

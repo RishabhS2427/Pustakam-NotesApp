@@ -34,6 +34,8 @@ data class ProfileUiState(
     val draftUsername: String = "",
     val availability: UsernameAvailability? = null,
     val isCheckingUsername: Boolean = false,
+    /** 🔧 17-Sep-2026 — the check did not answer. NOT the same as "taken", and never blocks Save. */
+    val checkFailed: Boolean = false,
     val isEditingUsername: Boolean = false,
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
@@ -47,8 +49,32 @@ data class ProfileUiState(
 
     val isDiscoverable: Boolean get() = user?.discoverable != false
 
-    val hasUnsavedDetails: Boolean
-        get() = user != null && (draftName != user.name.orEmpty() || draftBio != user.bio.orEmpty())
+    /**
+     * 🔧 17-Sep-2026 — the button and the request body are computed from the SAME two properties,
+     * so they cannot disagree. Before, Save lit up for a change the body then dropped (a cleared
+     * name, which the server's min(1) refuses), giving a button that looked live and did nothing.
+     *
+     * Neither requires a loaded user any more: if the profile fetch failed you could type a bio and
+     * Save stayed dead with nothing on screen saying why. An absent user compares as empty fields.
+     */
+    val changedName: String?
+        get() = draftName.trim().takeIf { it.isNotEmpty() && it != user?.name.orEmpty().trim() }
+
+    val changedBio: String?
+        get() = draftBio.trim().takeIf { it != user?.bio.orEmpty().trim() }
+
+    val hasUnsavedDetails: Boolean get() = changedName != null || changedBio != null
+
+    /**
+     * An answer counts only while it is about the handle on screen right now. The server echoes the
+     * canonical username it judged, so a slow reply for an earlier keystroke identifies itself and
+     * is ignored instead of unlocking Save for a handle nobody is typing any more.
+     */
+    private val answerIsForDraft: Boolean
+        get() = availability?.username == UsernameRules.canonical(draftUsername)
+
+    private val knownUnavailable: Boolean
+        get() = answerIsForDraft && availability?.available == false
 
     /** Locally invalid input never reaches the network, so the field can explain itself instantly. */
     val usernameHint: String
@@ -57,12 +83,25 @@ data class ProfileUiState(
             !UsernameRules.isWorthChecking(draftUsername) ->
                 UsernameAvailability(reason = UsernameRules.rejectionFor(draftUsername)?.name).message()
             isCheckingUsername -> "Checking…"
-            else -> availability?.message().orEmpty()
+            answerIsForDraft -> availability?.message().orEmpty()
+            checkFailed -> "Couldn't check right now — you can still save and the server will decide."
+            else -> ""
         }
 
+    /** Checking and check-failed are both "no verdict yet", so neither may paint the field red. */
+    val usernameHintIsNeutral: Boolean get() = isCheckingUsername || checkFailed
+
+    /**
+     * 🔧 17-Sep-2026 — Save is enabled unless we KNOW the handle is bad.
+     *
+     * It used to require `availability?.available == true`, i.e. a SUCCESSFUL round trip to
+     * /u/check. One dropped request, one 429 from usernameCheckLimiter, one moment offline, and the
+     * button stayed dead forever with no hint on screen, because usernameHint renders "" when
+     * availability is null. The server owns uniqueness anyway — a unique index plus a 409 on claim —
+     * so the check is a courtesy that fills in the hint, never the thing that grants permission.
+     */
     val canSaveUsername: Boolean
-        get() = !isSaving && availability?.available == true &&
-            UsernameRules.canonical(draftUsername) != user?.username
+        get() = !isSaving && UsernameRules.canSubmit(draftUsername, user?.username, knownUnavailable)
 }
 
 /** 👤 The profile screen. Reads through use cases only, like every other ViewModel here. */
@@ -92,12 +131,22 @@ class ProfileViewModel : BaseViewModel() {
 
     fun onBioChange(value: String) = _state.update { it.copy(draftBio = value) }
 
+    /**
+     * 🔧 17-Sep-2026 — sends only the fields that actually changed.
+     *
+     * It used to send name AND bio every time. updateUserSchema is .strict() and name is
+     * `min(1)`, so someone with no name who wrote a bio got a 422 for a field they never touched.
+     * explicitNulls = false means a null field is omitted from the body entirely, which is exactly
+     * the partial update the schema wants. An empty bio is still sent — the schema allows '' and
+     * that is how you clear one.
+     */
     fun saveDetails() {
         val current = _state.value
-        if (!current.hasUnsavedDetails) return
+        if (!current.hasUnsavedDetails || current.isSaving) return
+
         _state.update { it.copy(isSaving = true, error = null) }
         makeAWish<User>(PROFILE.UPDATE, showLoader = false) {
-            updateProfile(UpdateProfileReq(name = current.draftName.trim(), bio = current.draftBio.trim()))
+            updateProfile(UpdateProfileReq(name = current.changedName, bio = current.changedBio))
         }
     }
 
@@ -131,28 +180,32 @@ class ProfileViewModel : BaseViewModel() {
      */
     fun onUsernameChange(value: String) {
         availabilityJob?.cancel()
-        _state.update { it.copy(draftUsername = value, availability = null, isCheckingUsername = false) }
+        _state.update {
+            it.copy(draftUsername = value, availability = null, isCheckingUsername = false, checkFailed = false)
+        }
 
         if (!checkUsername.isWorthChecking(value)) return
-        if (UsernameRules.canonical(value) == _state.value.user?.username) return
+        // canonical on BOTH sides — the stored username keeps its display case
+        if (UsernameRules.canonical(value) == UsernameRules.canonical(_state.value.user?.username)) return
 
         availabilityJob = viewModelScope.launch {
             delay(AVAILABILITY_DEBOUNCE_MILLIS)
             _state.update { it.copy(isCheckingUsername = true) }
-            makeAWish<UsernameAvailability>(PROFILE.CHECK_USERNAME, showLoader = false) { checkUsername(value) }
+            makeAWish(PROFILE.CHECK_USERNAME, showLoader = false) { checkUsername(value) }
         }
     }
 
     /**
-     * Availability is always checked before saving, so a 409 here is only ever a lost race —
-     * which matters because baseApiCall discards the error body, leaving "taken" and "cooldown"
-     * indistinguishable on the client. Logged as a known issue.
+     * The claim can legitimately come back 409 — the availability check is a courtesy, not a gate,
+     * so Save is reachable before any answer arrives. baseApiCall discards the error body, so the
+     * message cannot yet distinguish "taken" from "renamed too recently" (K31); the sheet shows
+     * whatever it does get rather than failing silently, which is what it used to do.
      */
     fun saveUsername() {
         val current = _state.value
         if (!current.canSaveUsername) return
         _state.update { it.copy(isSaving = true, error = null) }
-        makeAWish<User>(PROFILE.SET_USERNAME, showLoader = false) { setUsername(current.draftUsername) }
+        makeAWish(PROFILE.SET_USERNAME, showLoader = false) { setUsername(current.draftUsername) }
     }
 
     // ── BaseViewModel ─────────────────────────────────────────────────────────
@@ -191,8 +244,21 @@ class ProfileViewModel : BaseViewModel() {
         }
     }
 
+    /**
+     * 🔧 17-Sep-2026 — a failed /u/check is handled separately from a failed anything-else.
+     *
+     * The check is a courtesy: it fills in the hint, it does not grant permission. So when it fails
+     * — the route missing, a 429 from usernameCheckLimiter, no signal — the screen must not raise an
+     * error banner, and Save must stay reachable. What it must NOT do is claim the handle is
+     * available: that is a guess the server would contradict one tap later, and the 409 would then
+     * arrive with no explanation the user could act on.
+     */
     override fun onFailure(taskCode: TaskCode, error: Error) {
         super.onFailure(taskCode, error)
+        if (taskCode == PROFILE.CHECK_USERNAME) {
+            _state.update { it.copy(isCheckingUsername = false, checkFailed = true) }
+            return
+        }
         _state.update {
             it.copy(isLoading = false, isSaving = false, isCheckingUsername = false, error = error.displayMessage())
         }

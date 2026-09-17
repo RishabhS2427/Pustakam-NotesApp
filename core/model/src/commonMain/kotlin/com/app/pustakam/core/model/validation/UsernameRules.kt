@@ -48,6 +48,22 @@ object UsernameRules {
 
     /** Cheap enough to run on every keystroke, so the network check only fires on plausible input. */
     fun isWorthChecking(input: String?): Boolean = rejectionFor(input) == null
+
+    /**
+     * 🔧 17-Sep-2026 — may this handle be submitted?
+     *
+     * Shared because both platforms must answer it identically, and because getting it wrong is
+     * invisible: the first version required a SUCCESSFUL /u/check before enabling Save, so one 429
+     * from usernameCheckLimiter or one dropped request left the button dead forever with no hint on
+     * screen. The server owns uniqueness — a unique index plus a 409 on claim — which means a check
+     * answer can only ever REMOVE permission, never grant it.
+     *
+     * @param knownUnavailable true only when the server answered about THIS exact handle and said no.
+     */
+    fun canSubmit(draft: String?, current: String?, knownUnavailable: Boolean): Boolean =
+        isWorthChecking(draft) &&
+            canonical(draft) != canonical(current) &&
+            !knownUnavailable
 }
 
 /** Mirrors the server's UsernameRejection so a reason code means the same thing on both sides. */

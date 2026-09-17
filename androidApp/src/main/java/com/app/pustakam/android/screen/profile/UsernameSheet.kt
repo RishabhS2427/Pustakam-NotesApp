@@ -33,9 +33,10 @@ fun UsernameSheet(
     username: String,
     hint: String,
     isAvailable: Boolean,
-    isChecking: Boolean,
+    isNeutral: Boolean,
     suggestions: List<String>,
     canSave: Boolean,
+    error: String? = null,
     onUsernameChange: (String) -> Unit,
     onPickSuggestion: (String) -> Unit,
     onSave: () -> Unit,
@@ -70,14 +71,14 @@ fun UsernameSheet(
                         text = hint,
                         style = typography.labelMedium,
                         color = when {
-                            isChecking -> colorScheme.onSurfaceVariant
+                            isNeutral -> colorScheme.onSurfaceVariant
                             isAvailable -> colorScheme.primary
                             else -> colorScheme.error
                         },
                     )
                 }
             },
-            isError = hint.isNotBlank() && !isAvailable && !isChecking,
+            isError = hint.isNotBlank() && !isAvailable && !isNeutral,
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -99,8 +100,14 @@ fun UsernameSheet(
             }
         }
 
+        // 🔧 17-Sep-2026 — the screen's error line sits BEHIND this sheet, so a failed check or a
+        //   rejected claim used to leave the user staring at a dead button with no explanation.
+        if (!error.isNullOrBlank()) {
+            Text(text = error, style = typography.labelMedium, color = colorScheme.error)
+        }
+
         Button(onClick = onSave, enabled = canSave, modifier = Modifier.fillMaxWidth()) {
-            Text("Save username")
+            Text("Save")
         }
     }
 }

@@ -93,6 +93,9 @@ class ChatListViewModel : BaseViewModel() {
         }
     }
 
+    /** The inbox filter is local and instant — it never touches the network. */
+    fun onInboxQueryChange(query: String) = emit(ChatListIntent.InboxQueryChanged(query))
+
     fun openPeerPicker() = emit(ChatListIntent.PeerPickerToggled(true))
 
     fun closePeerPicker() {

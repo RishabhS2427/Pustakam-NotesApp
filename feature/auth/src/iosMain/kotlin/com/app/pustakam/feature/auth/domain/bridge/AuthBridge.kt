@@ -7,6 +7,7 @@ import com.app.pustakam.core.model.models.response.User
 import com.app.pustakam.feature.auth.domain.usecase.LoginUseCase
 import com.app.pustakam.feature.auth.domain.usecase.LogoutUseCase
 import com.app.pustakam.core.model.models.profile.PublicUser
+import com.app.pustakam.core.model.validation.UsernameRules
 import com.app.pustakam.core.model.models.profile.UpdateProfileReq
 import com.app.pustakam.core.model.models.profile.UsernameAvailability
 import com.app.pustakam.core.network.MediaUpload
@@ -121,6 +122,13 @@ class AuthBridge : KoinComponent {
 
     /** 🆔 the local shape check, so a hopeless handle never costs a round trip. */
     fun isUsernameWorthChecking(username: String): Boolean = checkUsernameUseCase.isWorthChecking(username)
+
+    /**
+     * 🆔 may this handle be submitted? One shared rule so the two platforms cannot drift on the
+     * question that decides whether the Save button is alive — see UsernameRules.canSubmit.
+     */
+    fun canSubmitUsername(draft: String, current: String?, knownUnavailable: Boolean): Boolean =
+        UsernameRules.canSubmit(draft, current, knownUnavailable)
 
     fun localUsernameRejection(username: String): String? =
         checkUsernameUseCase.localRejection(username)?.name
