@@ -147,4 +147,6 @@ open class BasePreferences(private val dataStore: DataStore<Preferences>) : IApp
         )
     }
     override fun currentTokenOrNull(): String? =  userPreferenceStateFlow.value.token.ifBlank { null }
+
+    override fun currentUserId(): String = userPreferenceStateFlow.value.userId
 }

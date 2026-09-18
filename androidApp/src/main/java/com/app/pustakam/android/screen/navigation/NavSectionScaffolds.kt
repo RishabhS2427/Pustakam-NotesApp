@@ -2,6 +2,7 @@ package com.app.pustakam.android.screen.navigation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme.colorScheme
@@ -16,13 +17,14 @@ import androidx.compose.ui.unit.dp
 import com.app.pustakam.android.widgets.fabWidget.AddNewNoteFAB
 import com.app.pustakam.core.common.extensions.isNotnull
 
+
 @Composable
 fun AuthScaffold(
     modifier: Modifier = Modifier,
     content: @Composable (PaddingValues) -> Unit
 ) {
     Scaffold(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize().imePadding(),
         containerColor = colorScheme.background
     ) { padding ->
         content(padding)
@@ -39,7 +41,7 @@ fun HomeScaffold(
 ) {
     val chrome = NavRouteRegistry.chromeFor(currentRoute)
     Scaffold(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize().imePadding(),
         containerColor = colorScheme.background,
         topBar = { if (chrome.showsTopBar)
             if (currentRoute.isNotnull() && navController.shouldShowTopBar)

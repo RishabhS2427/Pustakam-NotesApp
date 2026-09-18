@@ -5,6 +5,7 @@ import com.app.pustakam.core.common.util.log_d
 import com.app.pustakam.core.database.ChatConversationEntity
 import com.app.pustakam.core.database.ChatMessageEntity
 import com.app.pustakam.core.database.NotesDatabase
+import com.app.pustakam.core.database.localdb.preferences.BasePreferences
 
 import com.app.pustakam.core.model.models.chat.AiReplyState
 import com.app.pustakam.core.model.models.chat.ChatAttachment
@@ -41,6 +42,10 @@ class ChatDao : KoinComponent {
     private val database = get<NotesDatabase>()
     private val queries = database.notesDatabaseQueries
 
+    // 🔒 inbox shows the logged-in user's conversations only
+    private val prefs = get<BasePreferences>()
+    private val userId: String get() = prefs.currentUserId()
+
     // ── conversations ─────────────────────────────────────────────────────────
 
     fun upsertConversation(conversation: ChatConversation) {
@@ -70,13 +75,13 @@ class ChatDao : KoinComponent {
     }
 
     fun conversations(): List<ChatConversation> =
-        queries.selectConversations().executeAsList().map { it.toModel() }
+        queries.selectConversations(userId).executeAsList().map { it.toModel() }
 
     fun conversation(id: String): ChatConversation? =
         queries.selectConversationById(id).executeAsOneOrNull()?.toModel()
 
     // A one-column query gives back the scalar itself — SQLDelight only wraps multi-column rows
-    fun totalUnread(): Int = queries.selectTotalUnread().executeAsOneOrNull()?.toInt() ?: 0
+    fun totalUnread(): Int = queries.selectTotalUnread(userId).executeAsOneOrNull()?.toInt() ?: 0
 
     fun setUnread(conversationId: String, count: Int) =
         queries.updateConversationUnread(unreadCount = count.toLong(), id = conversationId)
@@ -171,6 +176,12 @@ class ChatDao : KoinComponent {
             return
         }
         database.transaction {
+            // 💬 the broadcast may have already stored the server row — renaming onto it violates the
+            //    primary key, so drop the optimistic row instead of colliding with its twin
+            if (queries.selectMessageById(serverId).executeAsOneOrNull() != null) {
+                queries.deleteMessageById(localId)
+                return@transaction
+            }
             queries.replaceMessageId(
                 serverId = serverId,
                 status = status.name,

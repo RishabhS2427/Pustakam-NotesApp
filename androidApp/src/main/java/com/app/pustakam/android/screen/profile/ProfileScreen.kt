@@ -12,6 +12,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -90,115 +92,136 @@ fun ProfileScreen(
     ) { padding ->
         if (state.isLoading && state.user == null) {
             LoadingUI(modifier = Modifier.padding(padding))
-            return@Scaffold
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            // 🖼️ avatar, name and handle read as one block, so they keep their own tight spacing
+        } else {
             Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                CircleIconLoad(
-                    url = state.user?.avatarUrl.toAbsoluteMediaUrl(),
-                    size = 108.dp,
-                    onClick = onPickAvatar,
-                )
-                Text(
-                    text = state.user?.displayName().orEmpty(),
-                    style = typography.titleLarge,
-                    color = colorScheme.onSurface,
-                )
-                Text(
-                    text = state.handle.ifBlank { "No username yet" },
-                    style = typography.bodyMedium,
-                    color = colorScheme.primary,
-                )
-            }
-
-            state.error?.let {
-                Text(
-                    text = it,
-                    style = typography.labelMedium,
-                    color = colorScheme.error,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
-                )
-            }
-
-            SettingsSection(title = "Identity") {
-                SettingsCard {
-                    SettingsRow(
-                        icon = Icons.Filled.AlternateEmail,
-                        tint = colorScheme.primary,
-                        title = "Username",
-                        subtitle = "How people find you and start a chat",
-                        value = state.handle.ifBlank { "Choose one" },
-                        onClick = viewModel::openUsernameEditor,
+                // 🖼️ avatar, name and handle read as one block, so they keep their own tight spacing
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    CircleIconLoad(
+                        url = state.user?.avatarUrl.toAbsoluteMediaUrl(),
+                        size = 108.dp,
+                        onClick = onPickAvatar,
                     )
-                    SettingsRow(
-                        icon = Icons.Filled.Badge,
-                        tint = colorScheme.secondary,
-                        title = "Display name",
-                        value = state.draftName.ifBlank { "Not set" },
-                        onClick = { nameFocus.requestFocus() },
-                        isLast = true,
+                    Text(
+                        text = state.user?.displayName().orEmpty(),
+                        style = typography.titleLarge,
+                        color = colorScheme.onSurface,
+                    )
+                    Text(
+                        text = state.handle.ifBlank { "No username yet" },
+                        style = typography.bodyMedium,
+                        color = colorScheme.primary,
                     )
                 }
-            }
 
-            SettingsSection(title = "About you") {
-                SettingsCard {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = state.draftName,
-                            onValueChange = viewModel::onNameChange,
-                            label = { Text("Name") },
-                            singleLine = true,
-                            colors = POutLinedTextFieldColors(),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().focusRequester(nameFocus),
+                state.error?.let {
+                    Text(
+                        text = it,
+                        style = typography.labelMedium,
+                        color = colorScheme.error,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+                    )
+                }
+
+                SettingsSection(title = "Identity") {
+                    SettingsCard {
+                        SettingsRow(
+                            icon = Icons.Filled.AlternateEmail,
+                            tint = colorScheme.primary,
+                            title = "Username",
+                            subtitle = "How people find you and start a chat",
+                            value = state.handle.ifBlank { "Choose one" },
+                            onClick = viewModel::openUsernameEditor,
                         )
-                        OutlinedTextField(
-                            value = state.draftBio,
-                            onValueChange = { if (it.length <= BIO_MAX_LENGTH) viewModel.onBioChange(it) },
-                            label = { Text("Bio") },
-                            supportingText = { Text("${state.draftBio.length}/$BIO_MAX_LENGTH") },
-                            colors = POutLinedTextFieldColors(),
-                            shape = RoundedCornerShape(12.dp),
-                            maxLines = 3,
-                            modifier = Modifier.fillMaxWidth(),
+                        SettingsRow(
+                            icon = Icons.Filled.Badge,
+                            tint = colorScheme.secondary,
+                            title = "Display name",
+                            value = state.draftName.ifBlank { "Not set" },
+                            onClick = { nameFocus.requestFocus() },
                         )
-                        Button(
-                            onClick = viewModel::saveDetails,
-                            enabled = state.hasUnsavedDetails && !state.isSaving,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (state.isSaving) "Saving…" else "Save") }
+                        // 🔒 your OWN email and phone, which only you ever see — toSelfUser returns
+                        //   them to their owner and toPublicUser returns them to nobody. Shown only
+                        //   when set, so an account without a phone gets no empty row.
+                        state.user?.email?.takeIf { it.isNotBlank() }?.let { email ->
+                            SettingsRow(
+                                icon = Icons.Filled.Email,
+                                tint = colorScheme.tertiary,
+                                title = "Email",
+                                subtitle = "Used to sign in — never shown to anyone else",
+                                value = email,
+                                isLast = state.user?.phone.isNullOrBlank(),
+                            )
+                        }
+                        state.user?.phone?.takeIf { it.isNotBlank() }?.let { phone ->
+                            SettingsRow(
+                                icon = Icons.Filled.Phone,
+                                tint = colorScheme.secondary,
+                                title = "Phone",
+                                subtitle = "Used to sign in — never shown to anyone else",
+                                value = phone,
+                                isLast = true,
+                            )
+                        }
                     }
                 }
-            }
 
-            SettingsSection(title = "Discovery") {
-                SettingsCard {
-                    // 🔒 the copy must not overstate this: it governs SEARCH only
-                    SettingsRow(
-                        icon = Icons.Filled.Visibility,
-                        tint = colorScheme.tertiary,
-                        title = "Let people find me",
-                        subtitle = "Anyone with your exact username can always open your profile",
-                        isOn = state.isDiscoverable,
-                        onCheckedChange = viewModel::setDiscoverable,
-                        isLast = true,
-                    )
+                SettingsSection(title = "About you") {
+                    SettingsCard {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = state.draftName,
+                                onValueChange = viewModel::onNameChange,
+                                label = { Text("Name") },
+                                singleLine = true,
+                                colors = POutLinedTextFieldColors(),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().focusRequester(nameFocus),
+                            )
+                            OutlinedTextField(
+                                value = state.draftBio,
+                                onValueChange = { if (it.length <= BIO_MAX_LENGTH) viewModel.onBioChange(it) },
+                                label = { Text("Bio") },
+                                supportingText = { Text("${state.draftBio.length}/$BIO_MAX_LENGTH") },
+                                colors = POutLinedTextFieldColors(),
+                                shape = RoundedCornerShape(12.dp),
+                                maxLines = 3,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Button(
+                                onClick = viewModel::saveDetails,
+                                enabled = state.hasUnsavedDetails && !state.isSaving,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(if (state.isSaving) "Saving…" else "Save") }
+                        }
+                    }
+                }
+
+                SettingsSection(title = "Discovery") {
+                    SettingsCard {
+                        // 🔒 the copy must not overstate this: it governs SEARCH only
+                        SettingsRow(
+                            icon = Icons.Filled.Visibility,
+                            tint = colorScheme.tertiary,
+                            title = "Let people find me",
+                            subtitle = "Anyone with your exact username can always open your profile",
+                            isOn = state.isDiscoverable,
+                            onCheckedChange = viewModel::setDiscoverable,
+                            isLast = true,
+                        )
+                    }
                 }
             }
         }

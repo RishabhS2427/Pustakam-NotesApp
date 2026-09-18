@@ -55,8 +55,22 @@ struct ProfileView: View {
                         SettingsRow(icon: "person.text.rectangle", tint: Theme.Colors.copper,
                                     title: "Display name",
                                     value: viewModel.draftName.isEmpty ? "Not set" : viewModel.draftName,
-                                    isLast: true,
                                     onTap: { nameFocused = true })
+
+                        if let email = viewModel.user?.email, !email.isEmpty {
+                            SettingsRow(icon: "envelope", tint: Theme.Colors.indigo,
+                                        title: "Email",
+                                        subtitle: "Used to sign in — never shown to anyone else",
+                                        value: email,
+                                        isLast: (viewModel.user?.phone ?? "").isEmpty)
+                        }
+                        if let phone = viewModel.user?.phone, !phone.isEmpty {
+                            SettingsRow(icon: "phone", tint: Theme.Colors.copper,
+                                        title: "Phone",
+                                        subtitle: "Used to sign in — never shown to anyone else",
+                                        value: phone,
+                                        isLast: true)
+                        }
                     }
                 }
 

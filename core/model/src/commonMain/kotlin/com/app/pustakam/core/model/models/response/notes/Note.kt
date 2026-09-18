@@ -24,14 +24,10 @@ data class Note(
     val createdAt: String?,
     val categoryId: String? ="",
     val isSynced : Boolean? = false,
-    // 🔧 21-Jul-2026 databasev2.md §2.4: offline-first sync fields. ownerId + version are
-    //   app-generated uuid strings (never hardcoded) — set in NoteRepository.createNewEmptyNote.
     val ownerId: String? = null,
     val version: String = "",
     val syncStatus: String = "PENDING",
     val deleted: Boolean = false,
-    // 🔄 20-Aug-2026 sync: when the tombstone was made, and the SERVER's clock for this note.
-    //   Both are bookkeeping — NoteWireMapper strips them before a push.
     val deletedAt: String? = null,
     val serverUpdatedAt: Long? = null,
     val contents: List<NoteContentModel> = emptyList(),

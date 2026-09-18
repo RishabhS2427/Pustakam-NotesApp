@@ -190,7 +190,7 @@ SELECT
     NoteContent.checksum
 FROM Notes
 LEFT JOIN NoteContent ON Notes.id = NoteContent.noteId
-WHERE Notes.id = ?
+WHERE Notes.id = :id AND Notes.ownerId = :userId
 ORDER BY NoteContent.position;
 
 deleteNoteById :
@@ -232,7 +232,7 @@ SELECT
         ORDER BY c.position LIMIT 1) AS thumbnailPath
 -- 🔄 20-Aug-2026 sync: deleted = 0 — a tombstone must never surface in a list, search or export
 FROM Notes n
-WHERE n.deleted = 0
+WHERE n.deleted = 0 AND n.ownerId = :userId
 ORDER BY n.id
 LIMIT :limit OFFSET :offset;
 
@@ -275,7 +275,7 @@ SELECT
 FROM Notes
 LEFT JOIN NoteContent ON Notes.id = NoteContent.noteId
 -- 🔄 20-Aug-2026 sync: deleted = 0 — a tombstone must never surface in a list, search or export
-WHERE Notes.deleted = 0
+WHERE Notes.deleted = 0 AND Notes.ownerId = :userId
 ORDER BY Notes.id, NoteContent.position;
 -- LIMIT ? OFFSET ?;
 
@@ -288,7 +288,7 @@ SELECT
     SUBSTR(c.text, 1, 200) AS snippet
 FROM NoteContent c
 JOIN Notes n ON n.id = c.noteId
-WHERE c.type = 'TEXT' AND c.text LIKE '%' || :query || '%' AND n.deleted = 0
+WHERE c.type = 'TEXT' AND c.text LIKE '%' || :query || '%' AND n.deleted = 0 AND n.ownerId = :userId
 GROUP BY n.id
 ORDER BY n.updatedAt DESC
 LIMIT 50;
@@ -298,7 +298,7 @@ LIMIT 50;
 searchTitles:
 SELECT id, categoryId, title, createdAt, updatedAt
 FROM Notes
-WHERE title LIKE '%' || :query || '%' AND deleted = 0
+WHERE title LIKE '%' || :query || '%' AND deleted = 0 AND ownerId = :userId
 ORDER BY updatedAt DESC
 LIMIT 50;
 
@@ -376,12 +376,12 @@ SELECT * FROM CanvasViewport WHERE noteId = ?;
 --   'PENDING' is the schema default, so "not SYNCED" is the dirty predicate, not "== PENDING".
 selectDirtyNoteIds:
 SELECT id FROM Notes
-WHERE syncStatus != 'SYNCED'
+WHERE syncStatus != 'SYNCED' AND ownerId = :userId
 ORDER BY updatedAt
 LIMIT :limit;
 
 countDirtyNotes:
-SELECT count(*) FROM Notes WHERE syncStatus != 'SYNCED';
+SELECT count(*) FROM Notes WHERE syncStatus != 'SYNCED' AND ownerId = :userId;
 
 -- 🔄 the note row survives as a tombstone; its contents do not, mirroring the server's soft delete
 softDeleteNoteById:
@@ -495,7 +495,8 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
 
 selectConversations:
 SELECT * FROM ChatConversationEntity
-WHERE deleted = 0
+-- 🔒 separators both sides so ',a,b,' LIKE '%,a,%' is exact, not a substring hit
+WHERE deleted = 0 AND (',' || participantIds || ',') LIKE ('%,' || :userId || ',%')
 ORDER BY lastMessageAt DESC, id DESC;
 
 selectConversationById:
@@ -503,7 +504,8 @@ SELECT * FROM ChatConversationEntity WHERE id = ?;
 
 -- 🔢 the badge on the bottom bar: every unread message across every live thread
 selectTotalUnread:
-SELECT COALESCE(SUM(unreadCount), 0) FROM ChatConversationEntity WHERE deleted = 0;
+SELECT COALESCE(SUM(unreadCount), 0) FROM ChatConversationEntity
+WHERE deleted = 0 AND (',' || participantIds || ',') LIKE ('%,' || :userId || ',%');
 
 updateConversationUnread:
 UPDATE ChatConversationEntity SET unreadCount = :unreadCount WHERE id = :id;
@@ -581,3 +583,6 @@ WHERE id = :id;
 
 deleteMessagesForConversation:
 DELETE FROM ChatMessageEntity WHERE conversationId = ?;
+
+deleteMessageById:
+DELETE FROM ChatMessageEntity WHERE id = :id;

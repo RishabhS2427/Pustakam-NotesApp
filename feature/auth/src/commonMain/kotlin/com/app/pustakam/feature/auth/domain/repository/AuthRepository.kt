@@ -4,6 +4,7 @@ import com.app.pustakam.core.common.extensions.normalizedPhone
 import com.app.pustakam.core.common.util.Error
 import com.app.pustakam.core.common.util.NetworkError
 import com.app.pustakam.core.common.util.Result
+import org.koin.core.component.inject
 import com.app.pustakam.core.common.util.onSuccess
 import com.app.pustakam.core.data.base.BaseRepository
 import com.app.pustakam.core.database.localdb.preferences.UserPreference
@@ -74,11 +75,6 @@ internal class AuthRepository : BaseRepository(), IAuthRepository {
     override suspend fun updateProfile(request: UpdateProfileReq): Result<BaseResponse<User>, Error> =
         requireSession()?.let { Result.Error(it) } ?: apiClient.updateProfile(session.userId, request)
 
-    /**
-     * 🔧 17-Sep-2026 — these calls build a URL out of session.userId. A blank id silently produces
-     * `/users//username`, which the server answers 404 "No Record found" — a message that sends you
-     * hunting for a missing route when the real problem is that there is no session. Say that.
-     */
     private fun requireSession(): NetworkError? =
         if (session.userId.isBlank()) NetworkError.SESSION_EXPIRED else null
 
@@ -93,8 +89,10 @@ internal class AuthRepository : BaseRepository(), IAuthRepository {
     override suspend fun getPublicProfile(username: String): Result<BaseResponse<PublicUser>, Error> =
         apiClient.getPublicProfile(UsernameRules.canonical(username))
 
+
     override suspend fun searchPeople(query: String, limit: Int): Result<BaseResponse<List<PublicUser>>, Error> =
-        apiClient.searchPeople(UsernameRules.canonical(query), limit)
+        apiClient.searchPeople(query.trim(), limit)
+
 
     override suspend fun userLogout() {
         userPrefs.clear()

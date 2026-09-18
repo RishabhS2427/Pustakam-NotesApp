@@ -27,4 +27,7 @@ interface IAppPreferences {
     suspend fun getSyncGeneration(): Int
     suspend fun setSyncGeneration(generation: Int)
     fun currentTokenOrNull(): String?
+
+    // 🔒 logged-in user, read synchronously so a DAO query can scope itself
+    fun currentUserId(): String
 }

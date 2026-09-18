@@ -8,6 +8,7 @@ import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 import com.app.pustakam.core.model.models.response.notes.Notes
 import com.app.pustakam.core.database.NoteContent
 import com.app.pustakam.core.database.NotesDatabase
+import com.app.pustakam.core.database.localdb.preferences.BasePreferences
 import com.app.pustakam.core.common.util.ContentType
 import com.app.pustakam.core.common.util.getCurrentTimestamp
 import com.app.pustakam.core.common.util.isDoc
@@ -26,6 +27,10 @@ class NotesDao : KoinComponent {
 
     private val database =  get<NotesDatabase>()
     private val driver = get<SqlDriver>()
+
+    // 🔒 notes are read and written for the logged-in user only
+    private val prefs = get<BasePreferences>()
+    private val userId: String get() = prefs.currentUserId()
 
     private val queries = database.notesDatabaseQueries
 
@@ -56,7 +61,7 @@ class NotesDao : KoinComponent {
     }
    fun selectNoteSummariesPage(limit: Int, page: Int): List<com.app.pustakam.core.model.models.response.notes.NoteSummary> {
        val offset = ((page - 1) * limit).coerceAtLeast(0)
-       return queries.selectNoteSummariesPage(limit.toLong(), offset.toLong()).executeAsList().map { row ->
+       return queries.selectNoteSummariesPage(userId, limit.toLong(), offset.toLong()).executeAsList().map { row ->
            com.app.pustakam.core.model.models.response.notes.NoteSummary(
                id = row.id,
                title = row.title,
@@ -141,7 +146,7 @@ class NotesDao : KoinComponent {
            if (ensureFtsIndex()) {
                searchContentViaFts("\"" + trimmed.replace("\"", "") + "\"*")
            } else {
-               queries.searchContentTextLike(trimmed).executeAsList().map { row ->
+               queries.searchContentTextLike(trimmed, userId).executeAsList().map { row ->
                    NoteSummary(
                        id = row.id, title = row.title, categoryId = row.categoryId,
                        createdAt = row.createdAt, updatedAt = row.updatedAt, snippet = row.snippet,
@@ -153,7 +158,7 @@ class NotesDao : KoinComponent {
            emptyList()
        }
        contentMatches.forEach { merged[it.id] = it }
-       queries.searchTitles(trimmed).executeAsList().forEach { row ->
+       queries.searchTitles(trimmed, userId).executeAsList().forEach { row ->
            if (!merged.containsKey(row.id)) merged[row.id] = NoteSummary(
                id = row.id, title = row.title, categoryId = row.categoryId,
                createdAt = row.createdAt, updatedAt = row.updatedAt,
@@ -170,7 +175,7 @@ class NotesDao : KoinComponent {
           return Notes(notes = pagedNotes, count = pagedNotes.size, page = page)
       }
       val notesWithContent = arrayListOf<Note>()
-      val results  =  queries.selectWithAllContent().executeAsList()
+      val results  =  queries.selectWithAllContent(userId).executeAsList()
       val grouped = results.groupBy { it.noteId }
       grouped.forEach { (_, rows) ->
           val note = rows.first()
@@ -181,7 +186,7 @@ class NotesDao : KoinComponent {
                   title = note.title,
                   createdAt = note.noteCreatedAt,
                   updatedAt = note.noteUpdatedAt,
-                  ownerId = note.ownerId,
+                  ownerId = note.ownerId ?: userId,
                   version = note.version,
                   syncStatus = note.syncStatus,
                   deleted = note.deleted == 1L,
@@ -410,10 +415,10 @@ class NotesDao : KoinComponent {
 
     /** 🔄 the push queue. Tombstones are in it on purpose — the delete has to travel too. */
     fun selectDirtyNotes(limit: Int): List<Note> =
-        queries.selectDirtyNoteIds(limit.toLong()).executeAsList()
+        queries.selectDirtyNoteIds(userId, limit.toLong()).executeAsList()
             .mapNotNull { selectNoteByIdIncludingDeleted(it) }
 
-    fun countDirtyNotes(): Long = queries.countDirtyNotes().executeAsOne()
+    fun countDirtyNotes(): Long = queries.countDirtyNotes(userId).executeAsOne()
 
     /** 🖼️ the media backfill queue — notes whose bytes are on the server but not on this device. */
     fun selectNoteIdsNeedingMedia(limit: Int): List<String> =
@@ -441,7 +446,7 @@ class NotesDao : KoinComponent {
                 updatedAt = note.updatedAt,
                 createdAt = note.createdAt,
                 categoryId = note.categoryId,
-                ownerId = note.ownerId,
+                ownerId = note.ownerId ?: userId,
                 version = note.version,
                 syncStatus = SYNC_STATUS_SYNCED,
                 deleted = if (note.deleted) 1L else 0L,
@@ -487,7 +492,7 @@ class NotesDao : KoinComponent {
                 updatedAt = note.updatedAt,
                 createdAt = note.createdAt,
                 categoryId = note.categoryId,
-                ownerId = note.ownerId,
+                ownerId = note.ownerId ?: userId,
                 version = note.version,
                 syncStatus = note.syncStatus,
                 deleted = if (note.deleted) 1L else 0L,
@@ -512,7 +517,7 @@ class NotesDao : KoinComponent {
         selectNoteByIdIncludingDeleted(id)?.takeIf { !it.deleted }
 
     fun selectNoteByIdIncludingDeleted(id: String): Note? {
-        val rows = queries.selectById(id).executeAsList()
+        val rows = queries.selectById(id, userId).executeAsList()
         val noteWithContent = rows.firstOrNull()?.let { note ->
             Note(
                 id = note.noteId,
@@ -520,7 +525,7 @@ class NotesDao : KoinComponent {
                 title = note.title,
                 createdAt = note.noteCreatedAt,
                 updatedAt = note.noteUpdatedAt,
-                ownerId = note.ownerId,
+                ownerId = note.ownerId ?: userId,
                 version = note.version,
                 syncStatus = note.syncStatus,
                 deleted = note.deleted == 1L,
