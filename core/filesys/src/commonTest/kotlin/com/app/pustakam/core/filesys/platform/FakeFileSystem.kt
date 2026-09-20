@@ -26,6 +26,10 @@ class FakeFileSystem(
 
     override fun read(relativePath: String): ByteArray? = files[relativePath]
 
+    // 🖼️ a handle that lives outside app storage — the SAF/picked-file case
+    override fun readAbsolute(absolutePath: String): ByteArray? =
+        external[absolutePath] ?: files[absolutePath]
+
     override fun readText(relativePath: String, maxBytes: Long): String? {
         val bytes = files[relativePath] ?: return null
         val capped =

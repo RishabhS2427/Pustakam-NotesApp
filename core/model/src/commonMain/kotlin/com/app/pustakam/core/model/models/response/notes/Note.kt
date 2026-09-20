@@ -1,3 +1,6 @@
+// 🆔 20-Sep-2026 — @JsonNames below needs this opt-in.
+@file:OptIn(ExperimentalSerializationApi::class)
+
 package com.app.pustakam.core.model.models.response.notes
 
 import com.app.pustakam.core.model.models.RichTextMetadata
@@ -8,8 +11,10 @@ import com.app.pustakam.core.common.util.ContentType
 import com.app.pustakam.core.common.util.getCurrentTimestamp
 import com.app.pustakam.core.common.util.isPlayableMedia
 import com.app.pustakam.core.common.util.resolveLocalFilePath // 🔧 15-Jul-2026 iOS MEDIA-LOST FIX
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNames
 
 @Serializable
 enum class SyncStatus { LOCAL_ONLY, SYNCED, PENDING_UPDATE, PENDING_DELETE }
@@ -59,6 +64,8 @@ sealed class NoteContentModel {
     abstract val createdAt: String?
     // 🔧 C8: property serializes as "contentType" — "type" is reserved for the class discriminator
     abstract val type: ContentType
+    // 🆔 declarative only — kotlinx does NOT honour @SerialName on an abstract property. Every
+    //   concrete subclass repeats it; see the comment on TextContent.id.
     @SerialName("_id")
     abstract val id: String
     abstract val noteId : String
@@ -74,6 +81,17 @@ sealed class NoteContentModel {
         override val createdAt: String?,
         @SerialName("contentType")
         override val type: ContentType = ContentType.TEXT,
+        // 🆔 20-Sep-2026 — MUST be repeated here. @SerialName on the ABSTRACT property in the
+        //   sealed base does not reach the generated serializer: kotlinx builds each subclass
+        //   serializer from that subclass's own constructor. Without this every content block went
+        //   on the wire as "id", the server requires "_id", and it rejected every note the device
+        //   owned — "contents.0._id: Required" — so nothing ever synced, in either direction.
+        //   Same trap as @SerialName("contentType") on `type` just above; that one was already fixed.
+        @SerialName("_id")
+        // 🆔 …and ACCEPT the old spelling on the way in. A wire-format change lands on two apps and
+        //   a server that are never updated at the same moment; without this, a device on the old
+        //   build and a server on the new one simply cannot talk, in either direction.
+        @JsonNames("id")
         override val id: String,
         override val noteId: String ,
         override val position: Double,
@@ -94,6 +112,17 @@ sealed class NoteContentModel {
         override val type: ContentType ,
         override val updatedAt: String?,
         override val createdAt: String?,
+        // 🆔 20-Sep-2026 — MUST be repeated here. @SerialName on the ABSTRACT property in the
+        //   sealed base does not reach the generated serializer: kotlinx builds each subclass
+        //   serializer from that subclass's own constructor. Without this every content block went
+        //   on the wire as "id", the server requires "_id", and it rejected every note the device
+        //   owned — "contents.0._id: Required" — so nothing ever synced, in either direction.
+        //   Same trap as @SerialName("contentType") on `type` just above; that one was already fixed.
+        @SerialName("_id")
+        // 🆔 …and ACCEPT the old spelling on the way in. A wire-format change lands on two apps and
+        //   a server that are never updated at the same moment; without this, a device on the old
+        //   build and a server on the new one simply cannot talk, in either direction.
+        @JsonNames("id")
         override val id: String,
         val duration: Long = 0,
         val localPath: String? = null,
@@ -138,6 +167,17 @@ sealed class NoteContentModel {
         override val createdAt: String?,
         @SerialName("contentType")
         override val type: ContentType = ContentType.LINK,
+        // 🆔 20-Sep-2026 — MUST be repeated here. @SerialName on the ABSTRACT property in the
+        //   sealed base does not reach the generated serializer: kotlinx builds each subclass
+        //   serializer from that subclass's own constructor. Without this every content block went
+        //   on the wire as "id", the server requires "_id", and it rejected every note the device
+        //   owned — "contents.0._id: Required" — so nothing ever synced, in either direction.
+        //   Same trap as @SerialName("contentType") on `type` just above; that one was already fixed.
+        @SerialName("_id")
+        // 🆔 …and ACCEPT the old spelling on the way in. A wire-format change lands on two apps and
+        //   a server that are never updated at the same moment; without this, a device on the old
+        //   build and a server on the new one simply cannot talk, in either direction.
+        @JsonNames("id")
         override val id: String,
         override val position: Double,
         override val noteId: String,
@@ -153,6 +193,17 @@ sealed class NoteContentModel {
         override val createdAt: String?,
         @SerialName("contentType")
         override val type: ContentType = ContentType.LOCATION,
+        // 🆔 20-Sep-2026 — MUST be repeated here. @SerialName on the ABSTRACT property in the
+        //   sealed base does not reach the generated serializer: kotlinx builds each subclass
+        //   serializer from that subclass's own constructor. Without this every content block went
+        //   on the wire as "id", the server requires "_id", and it rejected every note the device
+        //   owned — "contents.0._id: Required" — so nothing ever synced, in either direction.
+        //   Same trap as @SerialName("contentType") on `type` just above; that one was already fixed.
+        @SerialName("_id")
+        // 🆔 …and ACCEPT the old spelling on the way in. A wire-format change lands on two apps and
+        //   a server that are never updated at the same moment; without this, a device on the old
+        //   build and a server on the new one simply cannot talk, in either direction.
+        @JsonNames("id")
         override val id: String,
         override val noteId: String,
         override val position: Double,

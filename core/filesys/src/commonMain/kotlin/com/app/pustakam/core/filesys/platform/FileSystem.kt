@@ -16,6 +16,16 @@ interface FileReader {
     fun read(relativePath: String): ByteArray?
 
     /**
+     * 🖼️ 20-Sep-2026 — the same, for a file that is NOT under app storage.
+     *
+     * A picked or shared attachment can legitimately live outside the sandbox. Sync used to skip
+     * those outright ("outside app storage"), which meant some of a note's files silently never
+     * uploaded and nothing said which. Reading where the file actually is costs nothing and keeps
+     * the promise that every file on a note syncs.
+     */
+    fun readAbsolute(absolutePath: String): ByteArray?
+
+    /**
      * Decoded text, truncated at [maxBytes] so a huge document cannot exhaust memory.
      * The cap exists because the book reader loads text files whole.
      */

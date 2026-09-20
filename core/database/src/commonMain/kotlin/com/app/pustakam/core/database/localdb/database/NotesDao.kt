@@ -424,6 +424,16 @@ class NotesDao : KoinComponent {
     fun selectNoteIdsNeedingMedia(limit: Int): List<String> =
         queries.selectNoteIdsNeedingMedia(limit.toLong()).executeAsList()
 
+    /** 🖼️ the media UPLOAD queue — notes holding a file this device has and the server does not.
+     *  Independent of the dirty-note queue on purpose: a file attached to an already-synced note,
+     *  or one whose first upload failed, is still pending and must be retried. */
+    fun selectNoteIdsNeedingUpload(limit: Int): List<String> =
+        queries.selectNoteIdsNeedingUpload(limit.toLong()).executeAsList()
+
+    /** 🖼️ a file just gained an assetId — the note has to travel again so the id reaches the
+     *  server. No-op on a note that is already dirty or already a tombstone. */
+    fun markNoteDirtyForMedia(id: String) = queries.markNoteDirtyForMedia(id)
+
     /** 🔄 only the server may mark a note clean, and only with the version IT accepted.
      *  🔄 28-Aug-2026 — [pushedVersion] is what the note went up with; a row that has moved past it
      *  was edited mid-push and stays dirty, so the newer edit still gets its turn. */

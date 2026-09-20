@@ -48,6 +48,9 @@ class IosFileReader : FileReader {
     override fun read(relativePath: String): ByteArray? =
         NSData.dataWithContentsOfFile(resolveInStorage(relativePath))?.toByteArray()
 
+    override fun readAbsolute(absolutePath: String): ByteArray? =
+        NSData.dataWithContentsOfFile(absolutePath)?.toByteArray()
+
     override fun readText(relativePath: String, maxBytes: Long): String? {
         val bytes = read(relativePath) ?: return null
         val capped = if (maxBytes in 1 until bytes.size.toLong()) {

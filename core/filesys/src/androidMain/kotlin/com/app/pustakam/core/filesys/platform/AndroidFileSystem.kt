@@ -24,6 +24,13 @@ class AndroidFileReader(private val context: Context) : FileReader {
         e.printStackTrace(); null
     }
 
+    override fun readAbsolute(absolutePath: String): ByteArray? = try {
+        val file = File(absolutePath)
+        if (file.exists() && file.isFile) file.readBytes() else null
+    } catch (e: Exception) {
+        e.printStackTrace(); null
+    }
+
     override fun readText(relativePath: String, maxBytes: Long): String? = try {
         val file = context.resolveInStorage(relativePath)
         if (!file.exists() || !file.isFile) null
