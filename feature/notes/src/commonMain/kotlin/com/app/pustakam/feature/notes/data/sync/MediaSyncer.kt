@@ -3,6 +3,7 @@ package com.app.pustakam.feature.notes.data.sync
 import com.app.pustakam.core.common.util.Result
 import com.app.pustakam.core.common.util.log_d
 import com.app.pustakam.core.common.util.resolveLocalFilePath
+import com.app.pustakam.core.common.util.ContentType
 import com.app.pustakam.core.filesys.mime.MimeCatalog
 import com.app.pustakam.core.filesys.path.PathPolicy
 import com.app.pustakam.core.filesys.platform.FileReader
@@ -87,10 +88,11 @@ class MediaSyncer : KoinComponent {
                 return@map content
             }
 
+            val fileName = (relative ?: absolute).substringAfterLast('/')
             val upload = MediaUpload(
                 contentId = content.id,
-                fileName = (relative ?: absolute).substringAfterLast('/'),
-                mimeType = content.mimeType.ifBlank { MimeCatalog.mimeFor(content.type) },
+                fileName = fileName,
+                mimeType = declaredMimeFor(content, fileName),
                 bytes = bytes,
             )
 
@@ -162,7 +164,48 @@ class MediaSyncer : KoinComponent {
     // 🖼️ the asset id IS unique, so no collision handling is needed; the extension keeps the
     //   existing type-detection-by-name path working (MimeCatalog.contentTypeFor).
     private fun fileNameFor(assetId: String, content: NoteContentModel.MediaContent): String {
+        // 🎧 20-Sep-2026 — every audio type used to land as ".mp3", because extensionFor() maps the
+        //   ContentType and ContentType.AUDIO.getExt() is ".mp3". An AAC recording written to a
+        //   .mp3 name will not open on the receiving device. Audio keeps its real extension; every
+        //   other type stays on the path it already used.
+        audioExtensionFor(content.mimeType)?.let { return "$assetId$it" }
         val type = MimeCatalog.contentTypeForMime(content.mimeType) ?: content.type
         return "$assetId${MimeCatalog.extensionFor(type)}"
     }
+
+    /**
+     * 🎧 The server preserves a declared audio type over an MP4 container sniff — but it can only
+     * preserve what it is told, and MimeCatalog.mimeFor(AUDIO) is "audio/mpeg" (MP3) for EVERY
+     * recording, .m4a ones included. So the declaration has to come from the file itself.
+     */
+    private fun declaredMimeFor(content: NoteContentModel.MediaContent, fileName: String): String {
+        val fallback = content.mimeType.trim().ifBlank { MimeCatalog.mimeFor(content.type) }
+        if (content.type != ContentType.AUDIO) return fallback
+        return audioMimeForExtension(fileName.substringAfterLast('.', "")) ?: fallback
+    }
+
+    private fun audioMimeForExtension(extension: String): String? =
+        when (extension.lowercase()) {
+            // 🎧 .mp4 included on purpose: Android's recorder writes AAC into an .mp4 name
+            "m4a", "mp4" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "wav" -> "audio/wav"
+            "amr" -> "audio/amr"
+            "ogg", "oga" -> "audio/ogg"
+            "flac" -> "audio/x-flac"
+            "mp3" -> "audio/mpeg"
+            else -> null
+        }
+
+    private fun audioExtensionFor(mimeType: String): String? =
+        when (mimeType.trim().lowercase().substringBefore(';')) {
+            "audio/mp4", "audio/x-m4a" -> ".m4a"
+            "audio/aac" -> ".aac"
+            "audio/wav", "audio/x-wav" -> ".wav"
+            "audio/amr" -> ".amr"
+            "audio/ogg" -> ".ogg"
+            "audio/flac", "audio/x-flac" -> ".flac"
+            "audio/mpeg" -> ".mp3"
+            else -> null
+        }
 }
