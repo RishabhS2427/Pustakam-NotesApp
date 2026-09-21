@@ -58,6 +58,27 @@ class AndroidFileWriter(private val context: Context) : FileWriter {
     } catch (e: Exception) {
         e.printStackTrace(); false
     }
+
+    // ⬇️ appending to a file that does not exist yet creates it, so a first chunk needs no special case
+    override fun append(relativePath: String, bytes: ByteArray): Boolean = try {
+        val file = context.resolveInStorage(relativePath)
+        file.parentFile?.mkdirs()
+        file.appendBytes(bytes)
+        true
+    } catch (e: Exception) {
+        e.printStackTrace(); false
+    }
+
+    // 📥 same volume, so renameTo is instant; the copy is only a fallback if the rename is refused
+    override fun move(fromRelativePath: String, toRelativePath: String): Boolean = try {
+        val from = context.resolveInStorage(fromRelativePath)
+        val to = context.resolveInStorage(toRelativePath)
+        to.parentFile?.mkdirs()
+        if (to.exists()) to.delete()
+        from.renameTo(to) || (from.copyTo(to, overwrite = true).exists() && from.delete())
+    } catch (e: Exception) {
+        e.printStackTrace(); false
+    }
 }
 
 class AndroidDirectoryManager(private val context: Context) : DirectoryManager {

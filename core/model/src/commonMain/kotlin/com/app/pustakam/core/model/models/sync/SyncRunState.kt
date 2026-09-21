@@ -64,12 +64,6 @@ object SyncConfig {
     const val BASE_BACKOFF_MILLIS = 30L * 1000L
     const val MAX_BACKOFF_MILLIS = 30L * 60L * 1000L
 
-    // 🖼️ matches the server's UPLOAD_MAX_BYTES default. A bigger file is SKIPPED and logged, never
-    //   allowed to fail the whole cycle — raise UPLOAD_MAX_BYTES on the server and this together.
-    // 🖼️ 20-Sep-2026 — was 25 MB, which silently dropped ordinary note attachments: a scanned PDF
-    //   or a few minutes of audio clears that easily, and the file then never synced at all.
-    const val MAX_MEDIA_BYTES = 100 * 1024 * 1024
-
     // 🖼️ eager download, but bounded per cycle so a first sync on a big library does not stall
     const val MEDIA_FILES_PER_CYCLE = 100
     const val MEDIA_NOTES_PER_CYCLE = 200

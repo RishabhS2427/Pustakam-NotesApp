@@ -144,8 +144,18 @@ object EditorReducer {
         is EditorIntent.ShowImportSheet ->
             if (intent.visible) listOf(EditorEffect.OpenImportPicker) else emptyList()
 
+        // 🎧 21-Sep-2026 — a synced file landed while the note is open: hand the player its new path
+        is EditorIntent.ExternalContentsChanged -> landedPlayableMedia(before, next)
+
         else -> emptyList()
     }
+
+    // 🎧 audio/video whose local file just appeared — the player still holds the old empty path, so play did nothing
+    private fun landedPlayableMedia(before: EditorState, next: EditorState): List<EditorEffect> =
+        next.mediaContents
+            .filter { it.isPlayableMedia() && !it.localPath.isNullOrEmpty() }
+            .filter { before.mediaById(it.id)?.localPath != it.localPath }
+            .map { EditorEffect.PublishMedia(it) }
 
     private fun saveOnly(state: EditorState): List<EditorEffect> =
         state.noteWithContents()

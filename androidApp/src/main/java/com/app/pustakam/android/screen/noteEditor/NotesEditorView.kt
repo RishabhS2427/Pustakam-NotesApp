@@ -117,6 +117,7 @@ import com.app.pustakam.core.common.extensions.isNotnull
 import com.app.pustakam.core.common.extensions.toLocalFormat
 import com.app.pustakam.core.common.util.ContentType
 import com.app.pustakam.core.filesys.mime.MimeCatalog
+import com.app.pustakam.core.media.naming.MediaFileNaming
 import com.app.pustakam.core.filesys.naming.FileNameGenerator.suggestedFileNameFromMedia
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -510,7 +511,7 @@ fun RenderWidget(
             val contentImage = content as NoteContentModel.MediaContent
             val path = contentImage.localPath ?: contentImage.url
             ImageCard(
-                imageUrl = path, modifier = Modifier,
+                imageUrl = path, modifier = Modifier, media = contentImage,
                 onShowActions = { visible ->
                     focusedMediaId = when {
                         visible -> contentImage.id
@@ -561,7 +562,8 @@ fun RenderWidget(
             val context = LocalContext.current
             val scope = rememberCoroutineScope()
             val exportLauncher = rememberLauncherForActivityResult(
-                contract =CreateDocument(MimeCatalog.mimeFor(contentAudio.type))
+                // 🎧 21-Sep-2026 — MIME follows the file (.m4a now, .mp3 older) or Android saves it as x.m4a.mp3
+                contract = CreateDocument(MediaFileNaming.declaredMimeFor(contentAudio.type, "", contentAudio.localPath.orEmpty()))
             ) { uri ->
                 if (uri != null) {
                     scope.launch {
@@ -621,7 +623,7 @@ fun RenderWidget(
         ContentType.GIF -> {
             val contentGif = content as NoteContentModel.MediaContent
             ImageCard(
-                imageUrl = contentGif.localPath ?: contentGif.url, modifier = Modifier,
+                imageUrl = contentGif.localPath ?: contentGif.url, modifier = Modifier, media = contentGif,
                 onShowActions = { visible ->
                     focusedMediaId = when {
                         visible -> contentGif.id

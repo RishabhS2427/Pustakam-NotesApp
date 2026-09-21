@@ -35,6 +35,8 @@ kotlin {
                 api(projects.core.data)
                 api(projects.core.database)
                 api(projects.core.filesys)
+                // 📥 20-Sep-2026 — MediaSyncer and the cards share ONE file-naming rule
+                api(projects.core.media)
                 api(libs.koin)
                 implementation(libs.kotlinx.coroutines.core)
             }

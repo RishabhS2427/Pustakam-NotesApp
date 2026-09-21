@@ -51,9 +51,7 @@ open class BasePreferences(private val dataStore: DataStore<Preferences>) : IApp
                 throw exception
             }
         }.map { preferences ->
-            mapAppPreferences(preferences).apply {
-                println(this)
-            }
+            mapAppPreferences(preferences)
         }
     // 🔧 20-Aug-2026 sync: Eagerly, was WhileSubscribed() — NOTHING collects this flow, it is only ever
     //   read via currentTokenOrNull().value, so the upstream never started and the token stayed blank forever.

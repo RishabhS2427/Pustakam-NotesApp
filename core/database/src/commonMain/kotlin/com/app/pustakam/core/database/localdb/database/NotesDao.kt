@@ -347,6 +347,23 @@ class NotesDao : KoinComponent {
         )
     }
 
+    // 🖼️ 21-Sep-2026 — one row, never the whole note: an upload can outlast the edits made while it ran
+    fun stampMediaAsset(contentId: String, assetId: String, url: String, checksum: String?, mimeType: String, sizeBytes: Long) {
+        queries.stampMediaAsset(
+            assetId = assetId,
+            url = url,
+            checksum = checksum,
+            mimeType = mimeType,
+            sizeBytes = sizeBytes,
+            id = contentId,
+        )
+    }
+
+    // 📥 21-Sep-2026 — one row: a finished download's path, only where the row has none yet
+    fun stampMediaLocalPath(contentId: String, localPath: String) {
+        queries.stampMediaLocalPath(localPath = localPath, id = contentId)
+    }
+
     fun updateReadingProgress(contentId: String, progressPage: Int, totalPages: Int) {
         queries.updateReadingProgress(
             progressPage = progressPage.toLong(),
@@ -428,7 +445,7 @@ class NotesDao : KoinComponent {
      *  Independent of the dirty-note queue on purpose: a file attached to an already-synced note,
      *  or one whose first upload failed, is still pending and must be retried. */
     fun selectNoteIdsNeedingUpload(limit: Int): List<String> =
-        queries.selectNoteIdsNeedingUpload(limit.toLong()).executeAsList()
+        queries.selectNoteIdsNeedingUpload(userId, limit.toLong()).executeAsList()
 
     /** 🖼️ a file just gained an assetId — the note has to travel again so the id reaches the
      *  server. No-op on a note that is already dirty or already a tombstone. */

@@ -76,6 +76,7 @@ fun MasterNodeContent(
                 content.type.isImage() -> ImageCard(
                     modifier = Modifier.fillMaxSize(),
                     imageUrl = content.getMediaUrl(),
+                    media = content,
                     onClick = onOpenMedia
                 )
 

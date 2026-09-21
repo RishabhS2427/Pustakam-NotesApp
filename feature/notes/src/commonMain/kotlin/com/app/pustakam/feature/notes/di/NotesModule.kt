@@ -50,7 +50,10 @@ import com.app.pustakam.feature.notes.domain.usecase.RequestSyncUseCase
 import com.app.pustakam.feature.notes.domain.usecase.SetSyncForegroundUseCase
 import com.app.pustakam.feature.notes.domain.usecase.StartSyncUseCase
 import com.app.pustakam.feature.notes.domain.usecase.SyncNowUseCase
+import com.app.pustakam.core.media.download.MediaLandingHandler
+import com.app.pustakam.core.media.upload.MediaUploadRetry
 import org.koin.core.module.Module
+import org.koin.dsl.binds
 import org.koin.dsl.module
 
 // 🔧 30-Jul-2026 02:10 — lifted VERBATIM out of :shared/koin/Koin.kt (was `repositoriesModules` + the notes half of `useCases`)
@@ -64,7 +67,13 @@ fun notesModule(): Module = module {
     single<INoteSyncRepository> { NoteSyncRepository() }
     // 🔄 20-Aug-2026 sync: single — it owns the run lock and the backoff counter, so a second
     //   instance would let two cycles push the same notes at once.
-    single<ISyncRepository> { SyncRepository() }
+    // 📥 21-Sep-2026 — the SAME instance lands finished downloads; binds, because ISyncRepository is not a MediaLandingHandler
+    single<ISyncRepository> { SyncRepository() } binds arrayOf(MediaLandingHandler::class)
+    // ⬆️ 21-Sep-2026 — "Retry" on a failed upload is a sync nudge: uploads only ever run inside sync
+    single<MediaUploadRetry> {
+        val sync = get<ISyncRepository>()
+        MediaUploadRetry { sync.requestSync() }
+    }
     // 🖼️ stateless — it only reads and writes files and calls the API
     single<MediaSyncer> { MediaSyncer() }
     factory<CreateORUpdateNoteUseCase> { CreateORUpdateNoteUseCase() }

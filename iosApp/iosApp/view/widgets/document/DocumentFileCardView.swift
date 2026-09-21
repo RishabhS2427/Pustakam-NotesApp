@@ -21,13 +21,10 @@ func iconNameForContentType(_ type: ContentType) -> String {
     }
 }
 
-// 🔧 18-Jul-2026: bytes → human size (Android readableSize parity)
+// 📏 20-Sep-2026: one size-wording rule, shared with the download bar and with Android
 func readableFileSize(_ bytes: Int64) -> String {
     guard bytes > 0 else { return "" }
-    if bytes < 1024 { return "\(bytes) B" }
-    if bytes < 1024 * 1024 { return "\(bytes / 1024) KB" }
-    if bytes < 1024 * 1024 * 1024 { return String(format: "%.1f MB", Double(bytes) / 1_048_576.0) }
-    return String(format: "%.1f GB", Double(bytes) / 1_073_741_824.0)
+    return MediaSizeFormatter.shared.formatBytes(bytes: bytes)
 }
 
 struct DocumentFileCardView: View {
@@ -44,6 +41,24 @@ struct DocumentFileCardView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            cardRow
+            // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+            MediaDownloadOverlay(media: media)
+        }
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.12)))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen() }
+        // 🔧 18-Jul-2026: same long-press action pattern as the media cards
+        .contextMenu {
+            Button { onOpen() } label: { Label("Open in book", systemImage: "book") }
+            Button { onSave() } label: { Label("Save to device", systemImage: "square.and.arrow.down") }
+            Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
+        }
+    }
+
+    private var cardRow: some View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
@@ -68,15 +83,6 @@ struct DocumentFileCardView: View {
             Image(systemName: "book").foregroundColor(Theme.Colors.secondary.opacity(0.7))
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.12)))
-        .contentShape(Rectangle())
-        .onTapGesture { onOpen() }
-        // 🔧 18-Jul-2026: same long-press action pattern as the media cards
-        .contextMenu {
-            Button { onOpen() } label: { Label("Open in book", systemImage: "book") }
-            Button { onSave() } label: { Label("Save to device", systemImage: "square.and.arrow.down") }
-            Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
-        }
     }
 }
 

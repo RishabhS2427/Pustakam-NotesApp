@@ -10,16 +10,25 @@ import com.app.pustakam.core.model.models.response.User
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.network.sockets.ConnectTimeoutException
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.util.network.UnresolvedAddressException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerializationException
@@ -41,6 +50,12 @@ private const val BEARER_PREFIX = "Bearer "
 @PublishedApi internal const val STATUS_PAYLOAD_TOO_LARGE = 413
 @PublishedApi internal const val STATUS_UNPROCESSABLE_ENTITY = 422
 @PublishedApi internal const val STATUS_TOO_MANY_REQUESTS = 429
+// 📥 20-Sep-2026 resumable downloads: 206 is a served Range, 416 an impossible one
+private const val STATUS_PARTIAL_CONTENT = 206
+private const val STATUS_RANGE_NOT_SATISFIABLE = 416
+private const val RANGE_UNIT = "bytes"
+// 📥 64 KB — small enough that progress moves visibly, large enough not to thrash the IO thread
+private const val DOWNLOAD_CHUNK_BYTES = 64 * 1024
 
 abstract class BaseClient  : KoinComponent {
     val userPrefs : IAppPreferences by inject<IAppPreferences>()
@@ -108,18 +123,8 @@ abstract class BaseClient  : KoinComponent {
                    }
                    emit(decoded)
                }
-               STATUS_BAD_REQUEST -> emit(Result.Error(NetworkError.BAD_REQUEST))
-               STATUS_UNAUTHORIZED -> emit(Result.Error(NetworkError.UNAUTHORIZED))
-               STATUS_FORBIDDEN -> emit(Result.Error(NetworkError.FORBIDDEN))
-               STATUS_NOT_FOUND -> emit(Result.Error(NetworkError.NOT_FOUND))
-               STATUS_CONFLICT -> emit(Result.Error(NetworkError.CONFLICT))
-               STATUS_REQUEST_TIMEOUT -> emit(Result.Error(NetworkError.REQUEST_TIMEOUT))
-               STATUS_PAYLOAD_TOO_LARGE -> emit(Result.Error(NetworkError.PAYLOAD_TOO_LARGE))
-               // 🔧 28-Aug-2026: the server answers a schema rejection with 422, not 400
-               STATUS_UNPROCESSABLE_ENTITY -> emit(Result.Error(NetworkError.VALIDATION_FAILED))
-               STATUS_TOO_MANY_REQUESTS -> emit(Result.Error(NetworkError.TOO_MANY_REQUESTS))
-               in 500 ..599 -> emit(Result.Error(NetworkError.SERVER_ERROR))
-               else ->  emit(Result.Error(NetworkError.UNKNOWN))
+               // 🔧 20-Sep-2026: one status table, shared with the streaming download path
+               else -> emit(Result.Error(errorForStatus(response.status.value)))
            }
 
        }.flowOn(Dispatchers.IO).first()
@@ -189,5 +194,102 @@ abstract class BaseClient  : KoinComponent {
             user.refreshToken?.takeIf { it.isNotBlank() }?.let { userPrefs.setRefreshToken(it) }
             true
         }
+    }
+
+    // ⏱️ files outlive the client-wide 30s request timeout; a stall still fails on the engines' own idle timeouts
+    protected fun HttpRequestBuilder.withoutRequestTimeout() {
+        timeout { requestTimeoutMillis = HttpTimeout.INFINITE_TIMEOUT_MS }
+    }
+
+    // 🔧 20-Sep-2026: the ONE status table, so a streamed response fails the same way a decoded one does
+    @PublishedApi
+    internal fun errorForStatus(status: Int): NetworkError = when (status) {
+        STATUS_BAD_REQUEST -> NetworkError.BAD_REQUEST
+        STATUS_UNAUTHORIZED -> NetworkError.UNAUTHORIZED
+        STATUS_FORBIDDEN -> NetworkError.FORBIDDEN
+        STATUS_NOT_FOUND -> NetworkError.NOT_FOUND
+        STATUS_CONFLICT -> NetworkError.CONFLICT
+        STATUS_REQUEST_TIMEOUT -> NetworkError.REQUEST_TIMEOUT
+        STATUS_PAYLOAD_TOO_LARGE -> NetworkError.PAYLOAD_TOO_LARGE
+        // 🔧 28-Aug-2026: the server answers a schema rejection with 422, not 400
+        STATUS_UNPROCESSABLE_ENTITY -> NetworkError.VALIDATION_FAILED
+        STATUS_TOO_MANY_REQUESTS -> NetworkError.TOO_MANY_REQUESTS
+        in 500..599 -> NetworkError.SERVER_ERROR
+        else -> NetworkError.UNKNOWN
+    }
+
+    // 🌊 20-Sep-2026 — streams chunks as they land (real progress); fromByte > 0 resumes with a Range request
+    protected suspend fun streamBytes(
+        url: String,
+        fromByte: Long,
+        onChunk: suspend (chunk: ByteArray, bytesSoFar: Long, totalBytes: Long) -> Unit,
+    ): Result<Long, Error> {
+        var attemptedRefresh = false
+        while (true) {
+            val outcome = try {
+                withContext(Dispatchers.IO) {
+                    httpClient.prepareGet(url) {
+                        withoutRequestTimeout()
+                        if (fromByte > 0) header(HttpHeaders.Range, "$RANGE_UNIT=$fromByte-")
+                    }.execute { response -> consume(response, fromByte, onChunk) }
+                }
+            } catch (e: UnresolvedAddressException) {
+                log_d("Error", "$e"); return Result.Error(NetworkError.NO_INTERNET)
+            } catch (e: ConnectTimeoutException) {
+                log_d("Error", "$e"); return Result.Error(NetworkError.CONNECTION_FAILED)
+            } catch (e: CancellationException) {
+                // ⏸️ a pause cancels the job — it must not be reported as a failure
+                throw e
+            } catch (e: Throwable) {
+                log_d("Error", "$e"); return Result.Error(NetworkError.CONNECTION_FAILED)
+            }
+
+            // 🔐 one silent refresh + one replay, exactly as baseApiCall does
+            if (outcome is Result.Error && outcome.error == NetworkError.UNAUTHORIZED && !attemptedRefresh) {
+                attemptedRefresh = true
+                if (!refreshSession()) return Result.Error(NetworkError.SESSION_EXPIRED)
+                continue
+            }
+            return outcome
+        }
+    }
+
+    private suspend fun consume(
+        response: HttpResponse,
+        fromByte: Long,
+        onChunk: suspend (chunk: ByteArray, bytesSoFar: Long, totalBytes: Long) -> Unit,
+    ): Result<Long, Error> {
+        val status = response.status.value
+        // 📥 416 means the local part file is longer than the asset — the caller restarts from zero
+        if (status == STATUS_RANGE_NOT_SATISFIABLE) return Result.Error(NetworkError.CONFLICT)
+        if (status !in 200..299) return Result.Error(errorForStatus(status))
+        // 📥 a 200 to a RANGED request means Range was ignored — appending would corrupt the part, so restart clean
+        if (fromByte > 0 && status != STATUS_PARTIAL_CONTENT) return Result.Error(NetworkError.CONFLICT)
+
+        val total = totalBytesOf(response, fromByte)
+
+        val channel = response.bodyAsChannel()
+        var soFar = fromByte
+        val buffer = ByteArray(DOWNLOAD_CHUNK_BYTES)
+        while (!channel.isClosedForRead) {
+            val read = channel.readAvailable(buffer, 0, buffer.size)
+            // 📥 -1 is end of stream; 0 only means "nothing right now"
+            if (read < 0) break
+            if (read == 0) continue
+            soFar += read
+            onChunk(buffer.copyOf(read), soFar, total)
+        }
+        return Result.Success(soFar)
+    }
+
+    // 📏 Content-Range wins ("bytes 400-999/1000"); without it Content-Length is the remainder
+    private fun totalBytesOf(response: HttpResponse, startAt: Long): Long {
+        response.headers[HttpHeaders.ContentRange]
+            ?.substringAfter('/', "")
+            ?.trim()
+            ?.toLongOrNull()
+            ?.let { return it }
+        val length = response.headers[HttpHeaders.ContentLength]?.toLongOrNull() ?: 0L
+        return if (length > 0) startAt + length else 0L
     }
 }

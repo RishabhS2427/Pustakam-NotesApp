@@ -71,6 +71,7 @@ import com.app.pustakam.android.extension.actionIconButtonBackground
 import com.app.pustakam.android.hardware.audio.player.MediaPlayingUIEvent
 // 🔧 15-Jul-2026 Phase 2.3: thumbnail placeholder for non-current video cards
 import com.app.pustakam.android.widgets.LoadImage
+import com.app.pustakam.android.widgets.media.MediaDownloadOverlay
 import com.app.pustakam.android.hardware.audio.player.PlayMediaViewModel
 import com.app.pustakam.android.hardware.audio.player.PlayerUiState
 import com.app.pustakam.android.theme.actionIconTintColor
@@ -150,6 +151,9 @@ fun VideoCard(
                                     onShowActions(false)
                                 }
                             })
+                    // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+                    // 📥 21-Sep-2026 — contentVideo, not the remembered copy: that never learns the asset id arriving later
+                    MediaDownloadOverlay(contentVideo, Modifier.align(Alignment.BottomCenter))
                     overlay()
                 }
         }

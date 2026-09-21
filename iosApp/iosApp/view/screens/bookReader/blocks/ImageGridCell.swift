@@ -21,6 +21,8 @@ struct ImageGridCell: View {
                 Color.black
                 Text("+\(overflow)").font(.title2).foregroundColor(.white)
             }
+            // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+            VStack { Spacer(); MediaDownloadOverlay(media: media) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(RoundedRectangle(cornerRadius: 12))

@@ -11,6 +11,7 @@ import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.usePinned
 import platform.Foundation.NSData
 import platform.Foundation.NSDocumentDirectory
+import platform.Foundation.NSFileHandle
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSFileSize
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
@@ -18,6 +19,7 @@ import platform.Foundation.NSURL
 import platform.Foundation.NSUserDomainMask
 import platform.Foundation.create
 import platform.Foundation.dataWithContentsOfFile
+import platform.Foundation.fileHandleForWritingAtPath
 import platform.Foundation.writeToFile
 import platform.posix.memcpy
 
@@ -67,6 +69,30 @@ class IosFileWriter : FileWriter {
         val absolute = resolveInStorage(relativePath)
         IosDirectoryManager().ensure(relativePath.substringBeforeLast('/', ""))
         return bytes.toNSData().writeToFile(absolute, atomically = true)
+    }
+
+    // ⬇️ 20-Sep-2026 — append, so a paused download resumes instead of starting over
+    override fun append(relativePath: String, bytes: ByteArray): Boolean {
+        val absolute = resolveInStorage(relativePath)
+        IosDirectoryManager().ensure(relativePath.substringBeforeLast('/', ""))
+        // ⬇️ NSFileHandle cannot create the file, so the first chunk is an ordinary write
+        if (!NSFileManager.defaultManager.fileExistsAtPath(absolute)) return write(relativePath, bytes)
+        val handle = NSFileHandle.fileHandleForWritingAtPath(absolute) ?: return false
+        // 📥 21-Sep-2026 — the error-returning calls: the old writeData: throws an ObjC exception on a full disk, which crashes K/N
+        val written = handle.seekToEndReturningOffset(null, null) && handle.writeData(bytes.toNSData(), null)
+        handle.closeAndReturnError(null)
+        return written
+    }
+
+    // 📥 21-Sep-2026 — a rename, so finishing a 100 MB download never loads it into memory
+    override fun move(fromRelativePath: String, toRelativePath: String): Boolean {
+        val from = resolveInStorage(fromRelativePath)
+        val to = resolveInStorage(toRelativePath)
+        IosDirectoryManager().ensure(toRelativePath.substringBeforeLast('/', ""))
+        val manager = NSFileManager.defaultManager
+        // 📥 moveItemAtPath refuses to overwrite, so a stale copy at the destination goes first
+        if (manager.fileExistsAtPath(to)) manager.removeItemAtPath(to, null)
+        return manager.moveItemAtPath(from, toPath = to, error = null)
     }
 }
 

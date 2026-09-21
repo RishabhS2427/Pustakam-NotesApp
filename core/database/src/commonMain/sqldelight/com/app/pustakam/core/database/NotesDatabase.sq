@@ -124,6 +124,19 @@ UPDATE NoteContent
 SET progressPage = ?, totalPages = ?, updatedAt = ?
 WHERE id = ?;
 
+-- 🖼️ 21-Sep-2026: an upload's server identity is written on its own — a video can upload for minutes,
+--   and rewriting the whole note afterwards clobbered everything typed meanwhile
+stampMediaAsset:
+UPDATE NoteContent
+SET assetId = ?, url = ?, checksum = ?, mimeType = ?, sizeBytes = ?
+WHERE id = ?;
+
+-- 📥 21-Sep-2026: a finished download's path, on its own row — also replaces a path whose file is gone
+stampMediaLocalPath:
+UPDATE NoteContent
+SET localPath = ?
+WHERE id = ?;
+
 -- 🔧 21-Jul-2026 databasev2.md §2.4: an edit re-marks the row dirty (syncStatus) and stamps version
 updateNotesById:
 UPDATE Notes
@@ -419,12 +432,16 @@ VALUES(?,?,?,?);
 --   image of selectNoteIdsNeedingMedia, and the thing that was missing: uploads only ever ran for
 --   notes sitting in the dirty queue, so a file attached to an already-synced note, or one whose
 --   first upload failed, was never looked at again. A file is pending until it HAS an assetId.
+-- ⬆️ 21-Sep-2026: this account only, newest first — a new recording was cut off behind old or other-account notes
 selectNoteIdsNeedingUpload:
-SELECT DISTINCT c.noteId FROM NoteContent c
+SELECT c.noteId FROM NoteContent c
 JOIN Notes n ON n.id = c.noteId
 WHERE n.deleted = 0
+AND n.ownerId = :userId
 AND (c.assetId IS NULL OR c.assetId = '')
 AND c.localPath IS NOT NULL AND c.localPath != ''
+GROUP BY c.noteId
+ORDER BY MAX(n.updatedAt) DESC
 LIMIT :limit;
 
 -- 🖼️ 20-Sep-2026 sync: a note whose file just gained an assetId has to go BACK on the push queue,

@@ -36,6 +36,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.app.pustakam.android.theme.typography
+import com.app.pustakam.android.widgets.media.MediaDownloadOverlay
+import com.app.pustakam.core.media.format.MediaSizeFormatter
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 import com.app.pustakam.core.common.util.ContentType
 
@@ -53,14 +55,8 @@ fun iconForContentType(type: ContentType): ImageVector = when (type) {
     else -> Icons.AutoMirrored.Filled.InsertDriveFile
 }
 
-// 🔧 18-Jul-2026: bytes → human size for the card subtitle
-fun readableSize(bytes: Long): String = when {
-    bytes <= 0 -> ""
-    bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-    bytes < 1024L * 1024 * 1024 -> "%.1f MB".format(bytes / (1024f * 1024f))
-    else -> "%.1f GB".format(bytes / (1024f * 1024f * 1024f))
-}
+// 📏 20-Sep-2026: one size-wording rule, shared with the download bar and with iOS
+fun readableSize(bytes: Long): String = if (bytes <= 0) "" else MediaSizeFormatter.formatBytes(bytes)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -105,6 +101,8 @@ fun DocumentFileCard(
                 }
             }
         }
+        // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+        MediaDownloadOverlay(media, Modifier.align(Alignment.BottomCenter))
         overlay()
     }
 }

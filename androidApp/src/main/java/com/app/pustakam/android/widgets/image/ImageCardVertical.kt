@@ -38,6 +38,8 @@ import com.app.pustakam.android.MyApplicationTheme
 import com.app.pustakam.android.extension.actionIconButtonBackground
 import com.app.pustakam.android.theme.actionIconTintColor
 import com.app.pustakam.android.widgets.LoadImage
+import com.app.pustakam.android.widgets.media.MediaDownloadOverlay
+import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -46,6 +48,8 @@ import kotlinx.coroutines.launch
 fun ImageCard(modifier: Modifier = Modifier,
               imageUrl : String = "", onClick: ()-> Unit,
               onShowActions: (Boolean) -> Unit = {},
+              // 📥 20-Sep-2026 — optional so the previews and any caller without a block still compile
+              media: NoteContentModel.MediaContent? = null,
               overlay: @Composable BoxScope.() -> Unit = {}) {
     val scope = rememberCoroutineScope()
     // 🔧 14-Jul-2026: pending auto-hide; cancelled and restarted on every long-press
@@ -75,6 +79,8 @@ fun ImageCard(modifier: Modifier = Modifier,
                         onShowActions(false)
                     }
                 })
+                // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+                if (media != null) MediaDownloadOverlay(media, Modifier.align(Alignment.BottomCenter))
                 overlay()
             }
         }

@@ -46,6 +46,7 @@ import com.app.pustakam.android.hardware.audio.player.PlayMediaViewModel
 import com.app.pustakam.android.hardware.audio.player.PlayerUiState
 import com.app.pustakam.android.services.mediaSessionService.PustakmMediaPlayerService
 import com.app.pustakam.android.theme.typography
+import com.app.pustakam.android.widgets.media.MediaDownloadOverlay
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 import com.app.pustakam.core.common.util.ContentType
 
@@ -71,7 +72,9 @@ fun  AudioPlayerUIState(
             if (!state.value.isServiceIsRunning) localContext.startServiceWrapper(Intent(localContext, PustakmMediaPlayerService::class.java))
             viewModel.onPlayingIntent(MediaPlayingUIEvent.SelectedMediaChange(noteContent.id))
         },
-            onSave = onSave
+            onSave = onSave,
+            // 📥 21-Sep-2026 — the LIVE block, not the remembered copy: that never learns the asset id arriving later
+            media = noteContentModel,
         )
     }
 }
@@ -80,7 +83,8 @@ fun  AudioPlayerUIState(
 @Composable
 fun AudioPlayView(
     state: PlayerUiState, onDelete: () -> Unit = {}, onPlay: () -> Unit = {}, onSeek: (Float) -> Unit = {},
-    onSave : () -> Unit = {}
+    onSave : () -> Unit = {},
+    media: NoteContentModel.MediaContent = state.noteContent,
 ) {
 
     val iconModifier = Modifier.size(28.dp)
@@ -153,6 +157,8 @@ fun AudioPlayView(
                     )
                 }
             }
+            // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+            MediaDownloadOverlay(media)
         }
     }
 }

@@ -21,6 +21,12 @@ class FileNameGeneratorTest {
         assertEquals("${ts}.epub", FileNameGenerator.generate(ContentType.EPUB, ts))
     }
 
+    // 🎧 a recording is AAC in MP4 on both platforms — named .m4a so every player and the server agree
+    @Test
+    fun capture_name_for_a_recording_is_m4a() {
+        assertEquals("${ts}.m4a", FileNameGenerator.generate(ContentType.AUDIO, ts))
+    }
+
     @Test
     fun capture_name_for_an_extensionless_type_is_just_the_timestamp() {
         assertEquals("$ts", FileNameGenerator.generate(ContentType.OTHER, ts))

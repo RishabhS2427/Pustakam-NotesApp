@@ -20,6 +20,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.app.pustakam.android.theme.typography
+import com.app.pustakam.android.widgets.media.MediaDownloadOverlay
 import com.app.pustakam.core.filesys.reader.BlockHeightEstimator
 import com.app.pustakam.core.filesys.reader.PageLayoutPolicy
 import com.app.pustakam.core.filesys.reader.ReaderBlock
@@ -89,5 +90,7 @@ private fun ImageCell(
         ) {
             Text("+$overflow", style = typography.headlineSmall, color = Color.White)
         }
+        // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+        MediaDownloadOverlay(media, Modifier.align(Alignment.BottomCenter))
     }
 }

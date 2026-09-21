@@ -41,6 +41,7 @@ fun ChatAttachmentsView(
             when {
                 media.type.isImage() -> ImageCard(
                     imageUrl = media.getMediaUrl(),
+                    media = media,
                     onClick = { onOpenMedia(media) },
                 )
 

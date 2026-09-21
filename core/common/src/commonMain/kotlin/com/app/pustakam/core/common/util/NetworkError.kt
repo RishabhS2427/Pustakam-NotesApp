@@ -4,7 +4,7 @@ enum class NetworkError : Error {
 
     CONNECTION_FAILED {
         override fun getError(): String {
-            return "Server Connection Falied"
+            return "Could not reach the server. Please try again."
         }
     },
     NOT_FOUND {

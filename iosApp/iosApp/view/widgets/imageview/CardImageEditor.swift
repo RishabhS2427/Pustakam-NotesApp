@@ -52,6 +52,9 @@ struct CardImageEditor: View {
                     .padding(.horizontal, 8)
             }
 
+            // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+            MediaDownloadOverlay(media: content)
+
             if showActions {
 
                 ZStack(alignment: .bottom) {

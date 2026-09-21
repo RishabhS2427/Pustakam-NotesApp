@@ -63,7 +63,12 @@ class MediaServiceListener(
         media.clear()
         media.addAll(mediaList)
         when {
-            newIds == currentIds -> return
+            // 📥 21-Sep-2026 — same ids, but a finished download changed a URI; ids alone kept the dead one
+            newIds == currentIds -> mediaList.forEachIndexed { index, item ->
+                if (exoPlayer.getMediaItemAt(index).localConfiguration?.uri != item.localConfiguration?.uri) {
+                    exoPlayer.replaceMediaItem(index, item)
+                }
+            }
             currentIds.isNotEmpty() && newIds.take(currentIds.size) == currentIds ->
                 mediaList.drop(currentIds.size).forEach { exoPlayer.addMediaItem(it) }
             else -> {

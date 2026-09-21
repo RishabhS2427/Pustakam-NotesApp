@@ -6,6 +6,7 @@ import com.app.pustakam.core.filesys.di.getFileSystemModule
 import com.app.pustakam.core.database.di.preferencesModule
 import com.app.pustakam.core.database.localdb.database.getDatabaseModule
 import com.app.pustakam.core.database.localdb.preferences.getDataSourceFromPlatForm
+import com.app.pustakam.core.media.di.mediaModule
 import com.app.pustakam.core.network.di.networkModule
 import com.app.pustakam.feature.auth.di.authModule
 import com.app.pustakam.feature.chat.di.chatModule
@@ -34,5 +35,7 @@ fun initKoin(appDeclaration: KoinAppDeclaration = {}) = startKoin {
         // 🔧 30-Jul-2026 02:10 Phase 4 — platform filesys seams (FileReader/Writer/Deleter/...).
         //   All `single`, all lazy — nothing is constructed until something injects it.
         getFileSystemModule(),
+        // 📥 20-Sep-2026 — one download manager for the whole app; needs network + filesys above
+        mediaModule(),
     )
 }

@@ -25,6 +25,7 @@ import com.app.pustakam.core.model.models.profile.SetUsernameReq
 import com.app.pustakam.core.model.models.profile.UpdateProfileReq
 import com.app.pustakam.core.model.models.profile.UsernameAvailability
 import com.app.pustakam.core.common.util.NetworkError
+import io.ktor.client.plugins.onUpload
 import io.ktor.client.request.delete
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.forms.submitFormWithBinaryData
@@ -82,7 +83,11 @@ class ApiCallClient : BaseClient() {
     /** 🖼️ 20-Aug-2026 sync: ONE file per request on purpose. The server persists a batch in a loop
      *  and throws on the first bad file, so a batch would let one unsupported attachment fail all
      *  the others. Per-file requests give per-file failure. */
-    suspend fun uploadMedia(file: MediaUpload): Result<BaseResponse<MediaUploadResponse>, Error> =
+    // ⬆️ 21-Sep-2026 — onProgress(sent, total) feeds the upload bar on the sender's card
+    suspend fun uploadMedia(
+        file: MediaUpload,
+        onProgress: (suspend (sent: Long, total: Long) -> Unit)? = null,
+    ): Result<BaseResponse<MediaUploadResponse>, Error> =
         baseApiCall<BaseResponse<MediaUploadResponse>, NetworkError> {
             httpClient.submitFormWithBinaryData(
                 url = ApiRoute.IMAGES.getName(),
@@ -96,7 +101,11 @@ class ApiCallClient : BaseClient() {
                         }
                     )
                 }
-            )
+            ) {
+                // ⏱️ 21-Sep-2026 — a recorded video takes longer than 30s to send over the tunnel
+                withoutRequestTimeout()
+                onProgress?.let { listener -> onUpload { sent, total -> listener(sent, total) } }
+            }
         }
 
     /** 🖼️ raw bytes — this route streams the file itself and does NOT wrap it in BaseResponse. */
@@ -104,6 +113,20 @@ class ApiCallClient : BaseClient() {
         baseApiCall<ByteArray, NetworkError> {
             httpClient.get(urlString = "${ApiRoute.MEDIA.getName()}/$userId/$assetId")
         }
+
+    /**
+     * 📥 20-Sep-2026 — the same asset, streamed, so a card can show a real percentage.
+     *
+     * [fromByte] resumes: the server answers 206 with only the bytes after it. Returns the total
+     * byte count that ended up on this device, so the caller can check it against the asset size.
+     */
+    suspend fun downloadMediaStream(
+        userId: String,
+        assetId: String,
+        fromByte: Long = 0,
+        onChunk: suspend (chunk: ByteArray, bytesSoFar: Long, totalBytes: Long) -> Unit,
+    ): Result<Long, Error> =
+        streamBytes("${ApiRoute.MEDIA.getName()}/$userId/$assetId", fromByte, onChunk)
 
     suspend fun getUser(userId: String): Result<BaseResponse<User>, Error> =
         get(url = "${ApiRoute.USERS.getName()}/$userId")

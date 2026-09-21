@@ -211,6 +211,25 @@ class EditorReducerTest {
         assertTrue(merged === clean)
     }
 
+    // 🎧 a download landing on an open note must reach the player, or its play button opens nothing
+    @Test
+    fun externalChange_publishesAPlayableFileThatJustLanded() {
+        val waiting = media("a1", ContentType.AUDIO, localPath = null)
+        val clean = EditorReducer.reduce(loaded(waiting), EditorIntent.Saved(note(), setOf("a1")))
+        val intent = EditorIntent.ExternalContentsChanged(listOf(waiting.copy(localPath = "/files/a1.m4a")))
+        val next = EditorReducer.reduce(clean, intent)
+
+        val published = EditorReducer.effects(clean, next, intent).filterIsInstance<EditorEffect.PublishMedia>()
+        assertEquals(listOf("/files/a1.m4a"), published.map { it.content.localPath })
+    }
+
+    @Test
+    fun externalChange_withoutANewFileDoesNotRepublish() {
+        val clean = EditorReducer.reduce(loaded(media("a1", ContentType.AUDIO)), EditorIntent.Saved(note(), setOf("a1")))
+        val intent = EditorIntent.ExternalContentsChanged(clean.contents)
+        assertTrue(EditorReducer.effects(clean, clean, intent).isEmpty())
+    }
+
     @Test
     fun refresh_isIgnoredWhileEditsAreUnsaved() {
         val dirty = loaded(text("t1"))

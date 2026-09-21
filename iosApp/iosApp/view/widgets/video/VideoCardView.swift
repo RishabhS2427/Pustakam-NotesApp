@@ -81,6 +81,9 @@ struct VideoCardPlayer : View {
                         .padding(.horizontal, 8)
                 }
 
+            // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+            MediaDownloadOverlay(media: content)
+
             // 🔧 14-Jul-2026: NEW — bottom-fade actions bar with delete/edit (CardImageEditor parity)
             if showActions {
                 ZStack(alignment: .bottom) {

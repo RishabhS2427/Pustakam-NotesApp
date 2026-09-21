@@ -155,6 +155,9 @@ struct AudioPlayView: View {
                 }.padding(.trailing,4)
             }
             .padding(.horizontal, 6)
+
+            // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+            MediaDownloadOverlay(media: mediaContent)
         }.onHover{ _ in
             viewModel.selectMedia()
         }

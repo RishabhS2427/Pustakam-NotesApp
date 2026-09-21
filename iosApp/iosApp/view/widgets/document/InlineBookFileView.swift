@@ -60,6 +60,9 @@ struct InlineBookFileView: View {
                         .foregroundColor(NotebookPalette.ink.opacity(0.65))
                         .padding(.vertical, 3)
                 }
+
+            // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+                MediaDownloadOverlay(media: media)
             }
             .background(NotebookPalette.paper)
             .clipShape(UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0,

@@ -32,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.app.pustakam.android.widgets.media.MediaDownloadOverlay
 import androidx.compose.ui.draw.clipToBounds   // 🔧 20-Jul-2026: keep zoom inside the card
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -167,6 +168,8 @@ fun InlineBookFileWidget(
                 }
             }
         }
+        // 📥 20-Sep-2026 — the generic transfer bar; draws nothing once the bytes are here
+        MediaDownloadOverlay(media, Modifier.align(Alignment.BottomCenter))
         overlay()
     }
 }

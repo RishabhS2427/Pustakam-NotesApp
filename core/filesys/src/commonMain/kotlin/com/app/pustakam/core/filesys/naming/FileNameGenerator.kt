@@ -18,7 +18,13 @@ object FileNameGenerator {
 
     /** Capture name: "<timestamp><ext>" — matches NoteContentProvider.addContent. */
     fun generate(type: ContentType, timestamp: Long): String =
-        "$timestamp${MimeCatalog.extensionFor(type)}"
+        "$timestamp${captureExtension(type)}"
+
+    // 🎧 21-Sep-2026 — both recorders write AAC inside MP4 (Android MPEG_4, iOS kAudioFormatMPEG4AAC): an .m4a, never an .mp3
+    private const val RECORDED_AUDIO_EXT = ".m4a"
+
+    private fun captureExtension(type: ContentType): String =
+        if (type == ContentType.AUDIO) RECORDED_AUDIO_EXT else MimeCatalog.extensionFor(type)
 
     /**
      * Path-safe name. Replaces separators, then caps the BASE while preserving the extension.

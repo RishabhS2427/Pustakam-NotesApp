@@ -56,7 +56,8 @@ import MediaPlayer
         list.forEach{ item in
             guard playList[item.id] == nil else { return }   // keep the existing (possibly playing) item
             let path = item.getMediaUrl()
-            guard !path.isEmpty else { return }
+            // 📥 21-Sep-2026 — never cache an item for a file not on disk yet; it outlived the download and never played
+            guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return }
             self.playList[item.id] = PlayerUiState(
                 mediaPlayerItem :AVPlayerItem(url: URL(fileURLWithPath: path)),
                 mediaContent: item

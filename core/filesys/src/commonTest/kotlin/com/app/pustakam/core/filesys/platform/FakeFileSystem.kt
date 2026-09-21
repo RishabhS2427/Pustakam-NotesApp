@@ -45,6 +45,14 @@ class FakeFileSystem(
         return true
     }
 
+    override fun append(relativePath: String, bytes: ByteArray): Boolean =
+        write(relativePath, (files[relativePath] ?: ByteArray(0)) + bytes)
+
+    override fun move(fromRelativePath: String, toRelativePath: String): Boolean {
+        val bytes = files.remove(fromRelativePath) ?: return false
+        return write(toRelativePath, bytes)
+    }
+
     // ---- DirectoryManager ----
 
     override fun ensure(folder: String): Boolean {

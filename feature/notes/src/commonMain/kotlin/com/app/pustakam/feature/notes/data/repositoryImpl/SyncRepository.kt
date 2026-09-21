@@ -10,7 +10,10 @@ import com.app.pustakam.core.common.util.log_d
 import com.app.pustakam.core.data.base.BaseRepository
 import com.app.pustakam.core.database.localdb.database.SYNC_STATUS_SYNCED
 import com.app.pustakam.core.model.models.BaseResponse
+import com.app.pustakam.core.media.download.MediaDownloadCoordinator
+import com.app.pustakam.core.media.download.MediaLandingHandler
 import com.app.pustakam.core.model.models.response.notes.Note
+import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 import com.app.pustakam.core.model.models.sync.SyncConfig
 import com.app.pustakam.core.model.models.sync.SyncPushRequest
 import com.app.pustakam.core.model.models.sync.SyncRunState
@@ -37,12 +40,17 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.core.component.inject
 
 private const val TAG = "SyncRepository"
+// ⬆️ at or above this a note's files take the large-upload lane (videos); below, the small lane (audio, photos)
+private const val LARGE_UPLOAD_BYTES = 10L * 1024 * 1024
 
-internal class SyncRepository : BaseRepository(), ISyncRepository {
+internal class SyncRepository : BaseRepository(), ISyncRepository, MediaLandingHandler {
 
     private val localNotes: ILocalNotesRepository by inject()
 
     private val mediaSyncer: MediaSyncer by inject()
+
+    // 📥 21-Sep-2026 — downloads go through the ONE shared engine: streamed, resumable, visible on the card
+    private val mediaDownloads: MediaDownloadCoordinator by inject()
 
     // 🔄 29-Aug-2026 — the in-app content bus. Every editor on both platforms already watches it,
     //   so a note pulled from the other device lands on an open screen with no new UI wiring.
@@ -77,6 +85,10 @@ internal class SyncRepository : BaseRepository(), ISyncRepository {
     private var stalledCycles = 0
     private var sawConnectivity = false
     private var saveNudge: Job? = null
+
+    // ⬆️ 21-Sep-2026 — two upload lanes, so a voice note or photo never waits behind a large video
+    private var smallUploadJob: Job? = null
+    private var largeUploadJob: Job? = null
 
     // 🔄 28-Aug-2026 — a save that lands mid-cycle is not in that cycle's payload; it needs one more run
     private var rerunRequested = false
@@ -207,12 +219,6 @@ internal class SyncRepository : BaseRepository(), ISyncRepository {
         var pushFailure: Error? = null
         var pullFailure: Error? = null
 
-        // 🖼️ 20-Sep-2026 — bytes BEFORE the push, driven by their OWN queue rather than the dirty
-        //   note list. A file used to upload only as a side effect of its note happening to be
-        //   waiting to travel: attach a file to an already-synced note, or have one upload fail
-        //   once, and it was never attempted again — the note was clean, so nothing looked at it.
-        flushMediaUploads()
-
         val pushed = when (val result = pushDirtyNotes(userId)) {
             is Result.Error -> 0.also { pushFailure = result.error }
             is Result.Success -> result.data
@@ -227,10 +233,13 @@ internal class SyncRepository : BaseRepository(), ISyncRepository {
 
         // 🖼️ 28-Aug-2026 — the bytes follow the PULL alone. Gating them on the whole cycle meant one
         //   note the server would not take also kept every image on this device permanently blank.
-        val mediaDownloaded = if (pullFailure == null) backfillMedia(userId) else 0
+        // 📥 21-Sep-2026 — QUEUED, not downloaded: the engine streams them and onLanded() stamps each path
+        val mediaQueued = if (pullFailure == null) backfillMedia() else 0
 
-        val changed = pushed > 0 || pulled > 0 || conflictsResolved > 0 ||
-            mediaUploaded > 0 || mediaDownloaded > 0
+        // ⬆️ 21-Sep-2026 — files go up in the BACKGROUND: a video can take minutes, and notes must never wait for it
+        startMediaUploads()
+
+        val changed = pushed > 0 || pulled > 0 || conflictsResolved > 0 || mediaUploaded > 0
         if (changed) localNotes.refreshFromDb()
 
         (pushFailure ?: pullFailure)?.let { return failed(it) }
@@ -240,12 +249,12 @@ internal class SyncRepository : BaseRepository(), ISyncRepository {
         log_d(
             TAG,
             "sync done: pushed=$pushed pulled=$pulled conflicts=$conflictsResolved " +
-                "mediaUp=$mediaUploaded mediaDown=$mediaDownloaded rejected=$notesRejected mediaSkipped=$mediaSkipped"
+                "mediaUp=$mediaUploaded mediaQueued=$mediaQueued rejected=$notesRejected mediaSkipped=$mediaSkipped"
         )
         return Result.Success(
             BaseResponse(
                 data = SyncSummary(
-                    pushed, pulled, mediaUploaded, mediaDownloaded, notesRejected, mediaSkipped
+                    pushed, pulled, mediaUploaded, mediaQueued, notesRejected, mediaSkipped
                 ),
                 isSuccessful = true
             )
@@ -271,27 +280,38 @@ internal class SyncRepository : BaseRepository(), ISyncRepository {
      *  files again. Now a file is pending purely because it has no assetId, and gaining one puts its
      *  note back on the push queue so the id actually reaches the other device.
      */
-    private suspend fun flushMediaUploads(): Int {
+    // ⬆️ one upload pass at a time, outside the run lock; a finished upload pushes its note straight away
+    private fun startMediaUploads() {
+        if (smallUploadJob?.isActive != true) smallUploadJob = scope.launch { flushMediaUploads(large = false) }
+        if (largeUploadJob?.isActive != true) largeUploadJob = scope.launch { flushMediaUploads(large = true) }
+    }
+
+    private suspend fun flushMediaUploads(large: Boolean): Int {
         var budget = SyncConfig.MEDIA_FILES_PER_CYCLE
         var uploaded = 0
 
-        for (noteId in notesDao.selectNoteIdsNeedingUpload(SyncConfig.MEDIA_NOTES_PER_CYCLE)) {
+        // ⬆️ newest first (the query's order); each lane takes only its own size class
+        val queue = notesDao.selectNoteIdsNeedingUpload(SyncConfig.MEDIA_NOTES_PER_CYCLE)
+            .mapNotNull { id -> notesDao.selectNoteByIdIncludingDeleted(id)?.takeIf { !it.deleted } }
+            .filter { (mediaSyncer.pendingBytes(it) >= LARGE_UPLOAD_BYTES) == large }
+
+        for (note in queue) {
             if (budget <= 0) break
-            val note = notesDao.selectNoteByIdIncludingDeleted(noteId)?.takeIf { !it.deleted } ?: continue
+            val noteId = note.id
 
             val outcome = mediaSyncer.uploadPending(note, budget)
             if (outcome.moved > 0) {
-                // 🖼️ insertOrUpdateNoteFromDb keeps whatever syncStatus the note already had;
-                //   markNoteDirtyForMedia then promotes a CLEAN one so the assetId can travel.
-                notesDao.insertOrUpdateNoteFromDb(outcome.note)
+                // 🖼️ 21-Sep-2026 — stamp ONLY the uploaded rows; writing the pre-upload snapshot back lost edits made meanwhile
+                stampUploadedRows(before = note, after = outcome.note)
+                // 🖼️ markNoteDirtyForMedia promotes a CLEAN note so the new assetId travels to the other device
                 notesDao.markNoteDirtyForMedia(noteId)
-                publishToOpenEditor(outcome.note)
+                notesDao.selectNoteByIdIncludingDeleted(noteId)?.let { publishToOpenEditor(it) }
+                // 🔄 push THIS note now, not after the whole queue — the other device gets it in seconds
+                requestSync()
                 uploaded += outcome.moved
                 budget -= outcome.moved
-                mediaUploaded += outcome.moved
             }
             if (outcome.skipped > 0) {
-                mediaSkipped += outcome.skipped
                 // 🖼️ the REASON travels with the outcome and is logged here, under this tag. It
                 //   used to be logged by MediaSyncer under its own tag, so anyone filtering the
                 //   sync log saw a skip count and no way to find out why.
@@ -307,37 +327,45 @@ internal class SyncRepository : BaseRepository(), ISyncRepository {
         return uploaded
     }
 
-    /** 🖼️ one pass over the notes whose bytes are on the server but not here. Bounded per cycle;
-     *  whatever does not fit is picked up next run, and the cap is logged rather than hidden. */
-    private suspend fun backfillMedia(userId: String): Int {
-        var budget = SyncConfig.MEDIA_FILES_PER_CYCLE
-        var downloaded = 0
+    // 🖼️ every block that gained an assetId in this upload, written one row at a time
+    private fun stampUploadedRows(before: Note, after: Note) {
+        val hadAsset = before.contents
+            .filterIsInstance<NoteContentModel.MediaContent>()
+            .filter { !it.assetId.isNullOrBlank() }
+            .map { it.id }
+            .toSet()
+        after.contents.forEach { content ->
+            if (content !is NoteContentModel.MediaContent || content.id in hadAsset) return@forEach
+            val assetId = content.assetId?.takeIf { it.isNotBlank() } ?: return@forEach
+            notesDao.stampMediaAsset(content.id, assetId, content.url, content.checksum, content.mimeType, content.sizeBytes)
+        }
+    }
 
+    // 📥 21-Sep-2026 — hands each missing file to the shared engine (streamed, resumable, shown on the card)
+    private fun backfillMedia(): Int {
+        var queued = 0
         for (noteId in notesDao.selectNoteIdsNeedingMedia(SyncConfig.MEDIA_NOTES_PER_CYCLE)) {
-            if (budget <= 0) break
-            val note = notesDao.selectNoteByIdIncludingDeleted(noteId) ?: continue
-
-            val outcome = mediaSyncer.downloadMissing(userId, note, budget)
-            if (outcome.moved > 0) {
-                // 🖼️ insertOrUpdateNoteFromDb, NOT applyServerNote — this must preserve whatever
-                //   syncStatus the note already had, or a locally edited note would be marked clean.
-                notesDao.insertOrUpdateNoteFromDb(outcome.note)
-                publishToOpenEditor(outcome.note)
-                downloaded += outcome.moved
-                budget -= outcome.moved
-            }
-            if (outcome.skipped > 0) {
-                mediaSkipped += outcome.skipped
-                log_d(
-                    TAG,
-                    "SYNC-MEDIA note $noteId: ${outcome.skipped} file(s) NOT downloaded — " +
-                        outcome.reasons.joinToString(" | ").ifBlank { "retried next cycle" }
-                )
+            val note = notesDao.selectNoteByIdIncludingDeleted(noteId)?.takeIf { !it.deleted } ?: continue
+            note.contents.forEach { content ->
+                if (content is NoteContentModel.MediaContent && content.needsDownload() &&
+                    mediaDownloads.startAutomatically(content)
+                ) queued++
             }
         }
+        if (queued > 0) log_d(TAG, "SYNC-MEDIA queued $queued file(s) for download")
+        return queued
+    }
 
-        if (budget <= 0) log_d(TAG, "media budget spent this cycle; the rest follows on the next run")
-        return downloaded
+    // 📥 21-Sep-2026 — stamps a finished download's path; no run lock (a cycle holds it for minutes), a lost path re-lands next cycle
+    override suspend fun onLanded(assetId: String, holderId: String, absolutePath: String) {
+        val note = notesDao.selectNoteByIdIncludingDeleted(holderId)?.takeIf { !it.deleted } ?: return
+        val rows = note.contents.filter {
+            it is NoteContentModel.MediaContent && it.assetId == assetId && it.localPath != absolutePath
+        }
+        if (rows.isEmpty()) return
+        rows.forEach { notesDao.stampMediaLocalPath(it.id, absolutePath) }
+        notesDao.selectNoteByIdIncludingDeleted(holderId)?.let { publishToOpenEditor(it) }
+        localNotes.refreshFromDb()
     }
 
     private suspend fun pushDirtyNotes(userId: String): Result<Int, Error> {
@@ -357,10 +385,7 @@ internal class SyncRepository : BaseRepository(), ISyncRepository {
 
             val (watermark, _) = notesDao.readSyncWatermark(userId)
 
-            // 🖼️ 20-Sep-2026 — the bytes already went up in flushMediaUploads() at the top of this
-            //   cycle, and these rows were read from the DB after that, so they carry their
-            //   assetIds. A note whose file could not be uploaded still pushes: it keeps no
-            //   assetId, stays in the upload queue, and is retried on its own from now on.
+            // ⬆️ 21-Sep-2026 — a note whose file is still uploading pushes without its assetId; the finished upload re-pushes it
             val prepared = dirty
 
             // 🔄 the version each note leaves with — only THAT version may be marked clean again

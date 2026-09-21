@@ -35,6 +35,12 @@ interface FileReader {
 /** Write bytes into app storage, creating parent folders as needed. */
 interface FileWriter {
     fun write(relativePath: String, bytes: ByteArray): Boolean
+
+    // ⬇️ 20-Sep-2026 — append, so a paused download resumes instead of starting over
+    fun append(relativePath: String, bytes: ByteArray): Boolean
+
+    // 📥 21-Sep-2026 — a rename, so finishing a 100 MB download never loads it into memory
+    fun move(fromRelativePath: String, toRelativePath: String): Boolean
 }
 
 /** Folder existence and listing. */
