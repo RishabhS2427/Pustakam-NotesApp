@@ -84,6 +84,11 @@ internal class SyncRepository : BaseRepository(), ISyncRepository, MediaLandingH
     private var stalledNoteId: String? = null
     private var stalledCycles = 0
     private var sawConnectivity = false
+
+    // 🔒 22-Sep-2026 — cached ONLY for startMediaUploads(), which is not a suspend function and so
+    //   cannot read the flow. Every suspend path reads offlineModeFlow directly; this is a cheap
+    //   pre-check, and flushMediaUploads() re-reads the real value per file.
+    private var offlineMode = false
     private var saveNudge: Job? = null
 
     // ⬆️ 21-Sep-2026 — two upload lanes, so a voice note or photo never waits behind a large video
@@ -108,6 +113,17 @@ internal class SyncRepository : BaseRepository(), ISyncRepository, MediaLandingH
         // 🔄 28-Aug-2026 — the save trigger used to be "the summaries flow moved", which only
         //   fires when a save happens to go through insertOrUpdateNote(). Every other write path
         //   saved silently and never synced. NoteRepository now calls requestSyncSoon() outright.
+
+        // 🔒 22-Sep-2026 — turning offline mode OFF is a trigger. Everything written while it was
+        //   on is still sitting dirty in SQLite; without this the user would wait for the timer.
+        scope.launch {
+            userPrefs.offlineModeFlow
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    offlineMode = enabled
+                    if (!enabled) requestSync()
+                }
+        }
 
         restartTimer()
     }
@@ -219,7 +235,16 @@ internal class SyncRepository : BaseRepository(), ISyncRepository, MediaLandingH
         var pushFailure: Error? = null
         var pullFailure: Error? = null
 
-        val pushed = when (val result = pushDirtyNotes(userId)) {
+        // 🔒 22-Sep-2026 — OFFLINE MODE is ONE-WAY: this device stops publishing, it does not stop
+        //   listening. The pull below still runs, so the notes screen keeps showing what other
+        //   devices wrote; only what leaves this device is held back. Read fresh each cycle rather
+        //   than cached in a field, so a cycle already in flight cannot push after the switch was
+        //   flipped. Nothing local changes: saves, edits and deletes still write to SQLite and stay
+        //   dirty, so turning the switch off flushes the backlog instead of losing it.
+        val publishing = !userPrefs.offlineModeFlow.first()
+        if (!publishing) log_d(TAG, "offline mode: pulling only, nothing leaves this device")
+
+        val pushed = if (!publishing) 0 else when (val result = pushDirtyNotes(userId)) {
             is Result.Error -> 0.also { pushFailure = result.error }
             is Result.Success -> result.data
             is Result.Loading -> 0
@@ -282,6 +307,12 @@ internal class SyncRepository : BaseRepository(), ISyncRepository, MediaLandingH
      */
     // ⬆️ one upload pass at a time, outside the run lock; a finished upload pushes its note straight away
     private fun startMediaUploads() {
+        // 🔒 22-Sep-2026 — uploads run outside the run lock, so they need the check themselves:
+        //   the gate in runCycle() never sees them. Downloads are inbound and stay on.
+        if (offlineMode) {
+            log_d(TAG, "offline mode: holding media uploads")
+            return
+        }
         if (smallUploadJob?.isActive != true) smallUploadJob = scope.launch { flushMediaUploads(large = false) }
         if (largeUploadJob?.isActive != true) largeUploadJob = scope.launch { flushMediaUploads(large = true) }
     }
@@ -297,6 +328,12 @@ internal class SyncRepository : BaseRepository(), ISyncRepository, MediaLandingH
 
         for (note in queue) {
             if (budget <= 0) break
+            // 🔒 22-Sep-2026 — the authoritative check. An upload lane runs outside the run lock and
+            //   can be mid-queue when the switch is flipped; stop there rather than finish the batch.
+            if (userPrefs.offlineModeFlow.first()) {
+                log_d(TAG, "offline mode: stopping media uploads, ${queue.size} note(s) stay queued")
+                break
+            }
             val noteId = note.id
 
             val outcome = mediaSyncer.uploadPending(note, budget)

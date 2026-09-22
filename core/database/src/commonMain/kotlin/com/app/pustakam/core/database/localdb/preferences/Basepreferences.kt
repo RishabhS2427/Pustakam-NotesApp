@@ -39,6 +39,7 @@ open class BasePreferences(private val dataStore: DataStore<Preferences>) : IApp
         val SYNC_GENERATION = intPreferencesKey("sync.generation")
         val THEME_MODE = stringPreferencesKey("granth.themeMode")
         val READING_MODE = stringPreferencesKey("granth.readingMode")
+        val OFFLINE_MODE = booleanPreferencesKey("granth.offlineMode")
     }
 
     override val userPreferencesFlow: Flow<UserPreference> = dataStore.data
@@ -103,9 +104,19 @@ open class BasePreferences(private val dataStore: DataStore<Preferences>) : IApp
         }
     }
 
+    override suspend fun setOfflineMode(mode: Boolean) {
+        dataStore.edit {
+            it[PreferencesKeys.OFFLINE_MODE] = mode
+        }
+    }
+
     override val readingModeFlow: Flow<String> = dataStore.data
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
         .map { it[PreferencesKeys.READING_MODE] ?: "page" }
+
+    override val offlineModeFlow: Flow<Boolean> = dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.OFFLINE_MODE] ?: false }
 
     // 🎨 22-Jul-2026 — persist the Appearance tile pick (spec §6)
     override suspend fun setThemeMode(mode: String) {

@@ -1,11 +1,3 @@
-//
-//  ReaderPrefsAdapter.swift
-//  iosApp
-//
-//  Created by Rishabh on 23/07/26.
-//  Copyright © 2026 orgName. All rights reserved.
-//
-
 import Foundation
 import shared
 
@@ -25,9 +17,17 @@ import shared
             onChange(ReadingMode.from(raw))
         })
     }
+    func observeOfflineMode(onChange: @escaping (Bool) -> Void) {
+        closeables.append(bridge.observeOfflineMode { raw in
+            onChange(raw ?? false)
+        })
+    }
 
     func setReadingMode(_ mode: ReadingMode) {
         bridge.setReadingMode(mode: mode.rawValue)
+    }
+    func setOfflineMode(_ mode: Bool) {
+        bridge.setOfflineMode(mode: mode)
     }
 
     func saveProgress(contentId: String, page: Int, totalPages: Int) {

@@ -1,14 +1,13 @@
 import SwiftUI
 
 struct SettingsView: View {
-
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.palette) private var palette
     @Environment(Router.self) var router: Router
     @State private var readerPrefs = ReaderPrefsAdapter()
     @State private var readingMode: ReadingMode = .page
+    @State private var offlineMode: Bool = false
     @State private var authBridge = AuthBridgeAdapter()
-    // 👤 31-Aug-2026 — the header used to be four hardcoded strings, one of them an email address
     @StateObject private var profile = ProfileViewModel()
     var body: some View {
         @Bindable var themeManager = themeManager
@@ -72,7 +71,10 @@ struct SettingsView: View {
                                     title: "Auto backup", subtitle: "Daily · encrypted", isOn: true)
                         SettingsRow(icon: "arrow.left.arrow.right", tint: Theme.Colors.copper,
                                     title: "Offline mode", subtitle: "Keep all notes on device",
-                                    isOn: false, isLast: true)
+                                    onToggle: { isOn in
+                                        readerPrefs.setOfflineMode(isOn)
+                                    },
+                                    isOn: offlineMode, isLast: true)
                     }
                 }
 
@@ -96,7 +98,10 @@ struct SettingsView: View {
         }
         .background(palette.background.ignoresSafeArea())
         // 📖 23-Jul-2026 — restore the persisted pick, and follow changes made in the reader
-        .onAppear { readerPrefs.observeReadingMode { readingMode = $0 } }
+        .onAppear {
+            readerPrefs.observeReadingMode { readingMode = $0 }
+            readerPrefs.observeOfflineMode { offlineMode = $0 }
+        }
         .task { profile.load() }
     }
 

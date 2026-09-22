@@ -13,6 +13,7 @@ import com.app.pustakam.core.common.extensions.isNotnull
 import com.app.pustakam.core.common.util.Error
 import com.app.pustakam.core.common.util.ErrorMessage
 import com.app.pustakam.core.common.util.NetworkError
+import kotlinx.coroutines.flow.first
 import com.app.pustakam.core.common.util.UniqueIdGenerator
 import com.app.pustakam.core.common.util.getCurrentTimestamp
 import com.app.pustakam.core.common.util.log_d
@@ -77,9 +78,14 @@ internal class NoteRepository : BaseRepository(), INoteRepository {
     }
 
     /**---------------- NOTES API SERVER CALL ------------*/
+    /** 🔒 22-Sep-2026 — offline mode has to hold on EVERY route to the server, not just the one
+     *  the sync engine takes. These wrappers have no live call site today; they are the remote
+     *  entry points on IRemoteNoteRepository, and the day one is switched back on the guarantee
+     *  must already be true here rather than remembered by whoever switches it on. */
+    private suspend fun offlineModeOn(): Boolean = userPrefs.offlineModeFlow.first()
+
     /** get all notes from server api call */
     override suspend fun getNotesForUserApi(page: Int): Result<BaseResponse<Notes>, Error> {
-
         return apiClient.getNotes(session.userId).onSuccess {
             it.data?.let { it1 -> notesDao.insertNotes(it1)
             }
@@ -87,6 +93,10 @@ internal class NoteRepository : BaseRepository(), INoteRepository {
     }
     /** update or insert note to server apis call */
     override suspend fun upsertNewNoteApi(note: Note): Result<BaseResponse<Note>, Error> {
+        if (offlineModeOn()) {
+            insertUpdateFromDb(note)
+            return Result.Error(NetworkError.OFFLINE_MODE)
+        }
         return  apiClient.addNewNote(session.userId, note).onSuccess {
             it.data?.let { it1 ->
                 log_d("NoteRepository", "addNewNote: $it1")
@@ -95,23 +105,35 @@ internal class NoteRepository : BaseRepository(), INoteRepository {
         }
     }
     /** update note apis call to server*/
-    override suspend fun updateNoteApi(note: Note): Result<BaseResponse<Note>, Error> =
-        apiClient.updateNote(session.userId, note).onSuccess {
+    override suspend fun updateNoteApi(note: Note): Result<BaseResponse<Note>, Error> {
+        if (offlineModeOn()){
+            insertUpdateFromDb(note)
+            return Result.Error(NetworkError.OFFLINE_MODE)
+        }
+        return apiClient.updateNote(session.userId, note).onSuccess {
             it.data?.let {
                     it1 ->
                 log_d("NoteRepository", "addNewNote: $it1")
                 insertUpdateFromDb(it1)
             }
         }
+    }
 
     /** delete note apis call to server */
-    override suspend fun deleteNoteApi(noteId: String): Result<BaseResponse<DeleteDataModel>, Error> =
-        apiClient.deleteNote(session.userId, noteId).onSuccess {
+    override suspend fun deleteNoteApi(noteId: String): Result<BaseResponse<DeleteDataModel>, Error> {
+        if (offlineModeOn())  {
+            deleteNoteByIdFromDb(noteId)
+           return Result.Error(NetworkError.OFFLINE_MODE)
+        }
+        return apiClient.deleteNote(session.userId, noteId).onSuccess {
             deleteNoteByIdFromDb(noteId)
         }
+    }
+
     /**  get a note apis call from server */
-    override suspend fun getNoteApi(noteId: String): Result<BaseResponse<Note>, Error>
-            = apiClient.getNote(session.userId, noteId)
+    override suspend fun getNoteApi(noteId: String): Result<BaseResponse<Note>, Error> {
+        return apiClient.getNote(session.userId, noteId)
+    }
 
 
     /**-----------------------LOCAL DATABASE -------------*/
@@ -288,7 +310,6 @@ internal class NoteRepository : BaseRepository(), INoteRepository {
      * */
     override suspend fun deleteNote(id : String): Result<BaseResponse<Boolean>, Error> {
         return deleteNoteByIdFromDb(id).onSuccess {
-            //deleteNoteApi(id)
             _notes.update { current ->
                 val newList = ArrayList(current.notes.filterNot { n -> n.id == id })
                 if (newList.size != current.notes.size) current.copy(notes = newList) else current
@@ -341,9 +362,7 @@ internal class NoteRepository : BaseRepository(), INoteRepository {
             if(notes.data != null && notes.data!!.notes.count() > 0){
               insertNotes(notes = notes.data!!)
             }
-//            getNotesForUserApi(page)
         }.onError {
-//            getNotesForUserApi(page)
         }
     }
 

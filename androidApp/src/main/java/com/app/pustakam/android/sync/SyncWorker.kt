@@ -43,6 +43,8 @@ class SyncWorker(context: Context, params: WorkerParameters) :
         notifyConnectivity(true)
 
         var failed = false
+        // 🔒 22-Sep-2026 — offline mode no longer short-circuits a cycle: the pull still runs and
+        //   only the push is held back, so a run under offline mode is an ordinary success.
         syncNowUseCase().collect { result -> if (result is AppResult.Error) failed = true }
 
         return when {

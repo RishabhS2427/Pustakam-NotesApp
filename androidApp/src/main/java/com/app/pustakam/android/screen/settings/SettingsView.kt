@@ -70,13 +70,8 @@ import com.app.pustakam.android.theme.ThemeTilePicker
 import com.app.pustakam.android.theme.radiusLg
 import com.app.pustakam.android.theme.radiusMd
 
-// 🎨 22-Jul-2026 — Granth spec §6 Settings, matched to iOS SettingsView.swift. Replaces the
-//   placeholder Text("Settings") with the profile header + grouped sections. Appearance is live-wired
-//   through SettingsViewModel → shared DataStore; the remaining rows are presentational until their
-//   features land.
 @Composable
 fun SettingsScreen(
-    // 🔧 22-Jul-2026 — was `(Route)->Unit` importing okhttp3.Route by mistake; navigateTo takes a String
     onNavigate: (String) -> Unit,
     onBack: () -> Unit = {},
     viewModel: SettingsViewModel = viewModel()

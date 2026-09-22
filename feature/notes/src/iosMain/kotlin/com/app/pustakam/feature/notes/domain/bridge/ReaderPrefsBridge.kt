@@ -36,6 +36,12 @@ class ReaderPrefsBridge : KoinComponent {
     fun setReadingMode(mode: String) {
         writeScope.launch { prefs.setReadingMode(mode) }
     }
+    fun observeOfflineMode(onChange: (Boolean) -> Unit): Closeable =
+        prefs.offlineModeFlow.watch(scope) { onChange(it) }
+    fun setOfflineMode(mode: Boolean) {
+        writeScope.launch { prefs.setOfflineMode(mode) }
+    }
+
 
     // 📖 23-Jul-2026: reading progress lives on the document's media row. The bridge goes through the
     //   SAME use case Android uses (UpdateReadingProgressUseCase) — never the DAO directly — so the

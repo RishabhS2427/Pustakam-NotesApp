@@ -64,6 +64,14 @@ enum class NetworkError : Error {
             return "You do not have access to this."
         }
     },
+    // 🔒 22-Sep-2026: offline mode is the USER's choice, not a fault. It is an Error only so the
+    //   reason reaches the screen — pull-to-refresh has to say why nothing happened rather than
+    //   spin and report success. Nothing about it drives backoff or a retry.
+    OFFLINE_MODE {
+        override fun getError(): String {
+            return "Offline mode is on. Notes are saved on this device and will sync when you turn it off."
+        }
+    },
     // 🔧 20-Aug-2026: 400 used to map to NOT_FOUND, which hid every validation failure
     BAD_REQUEST {
         override fun getError(): String {

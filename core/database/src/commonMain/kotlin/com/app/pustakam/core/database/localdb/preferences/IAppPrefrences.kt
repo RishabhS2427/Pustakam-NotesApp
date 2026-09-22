@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 interface IAppPreferences {
     val userPreferencesFlow: Flow<UserPreference>
     val readingModeFlow: Flow<String>
+    val offlineModeFlow: Flow<Boolean>
 
     suspend fun setToken(token : String)
     // 🔐 20-Aug-2026 sync: the rotating refresh token — access tokens live 15 minutes, sync outlives that
@@ -20,6 +21,7 @@ interface IAppPreferences {
     // 📖 23-Jul-2026 — reader: "page" (curl) vs "scroll" (continuous).
     //   Per-book resume is NOT here — it lives on MediaContent (progressPage/totalPages).
     suspend fun setReadingMode(mode : String)
+    suspend fun setOfflineMode(mode : Boolean)
     suspend fun  clear()
     // 🔄 28-Aug-2026 — which generation of the sync engine last wrote this device's pull watermark.
     //   Bumping SyncConfig.RESYNC_GENERATION makes every existing install re-pull once, which is
@@ -30,4 +32,5 @@ interface IAppPreferences {
 
     // 🔒 logged-in user, read synchronously so a DAO query can scope itself
     fun currentUserId(): String
+
 }

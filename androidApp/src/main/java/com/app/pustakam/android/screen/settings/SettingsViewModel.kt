@@ -92,7 +92,6 @@ class SettingsViewModel : BaseViewModel() {
         _uiState.update { it.copy(readingMode = next) }
         viewModelScope.launch(Dispatchers.IO) { userPrefs.setReadingMode(next.key) }
     }
-
     // 🎨 persist the tile pick; the app root observes the same flow and retints immediately
     fun onThemeModeSelected(mode: ThemeMode) {
         _uiState.update { it.copy(themeMode = mode) }
@@ -112,8 +111,10 @@ class SettingsViewModel : BaseViewModel() {
     fun onAutoBackupChange(enabled: Boolean) =
         _uiState.update { it.copy(autoBackup = enabled) }
 
-    fun onOfflineModeChange(enabled: Boolean) =
+    fun onOfflineModeChange(enabled: Boolean) {
         _uiState.update { it.copy(offlineMode = enabled) }
+        viewModelScope.launch(Dispatchers.IO) { userPrefs.setOfflineMode(enabled) }
+    }
 
     override fun onSuccess(taskCode: TaskCode, result: Result.Success<BaseResponse<*>>) {
         if (taskCode == PROFILE.USER_PROFILE) {
