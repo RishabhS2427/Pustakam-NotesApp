@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -53,118 +54,137 @@ fun MasterNodeContent(
 ) {
     val colors = SmartTextTokens.colors
     when  {
+        // 📄 paper owns no content of its own — the widgets dropped on it draw themselves
+        node.isPage -> Unit
+
          content is NoteContentModel.TextContent  -> {
             if (textState == null) {
                 MasterNodePlaceholder("Empty text")
             } else {
                 MasterTextWidget(
                     state = textState,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    // 🧱 24-Sep-2026 — no margin of its own: the page's 8dp spacing is the only space around a widget
+                    modifier = Modifier.fillMaxWidth(),
                     scale = scale,
                     scrollable = false,
                     minLines = 5,
                     readOnly = false,
                     onIntent = onTextIntent,
-                    keyboardInsetPx = keyboardInsetPx,
+                    keyboardInsetPx = if (isEditing) keyboardInsetPx else 0f,
                     shouldFocus = isEditing,
+                    reserveKeyboardRoom = false,
+                    revealCaret = isEditing,
                     onFocusChanged = { if (it) onFocused() }
                 )
             }
         }
         content is NoteContentModel.MediaContent -> {
+            // 🧱 24-Sep-2026 — every card fills exactly the compact size the canvas gave it, with no margin of its own
+            val cardHeight = node.rect.height.dp
             when  {
                 content.type.isImage() -> ImageCard(
                     modifier = Modifier.fillMaxSize(),
                     imageUrl = content.getMediaUrl(),
                     media = content,
-                    onClick = onOpenMedia
+                    onClick = onOpenMedia,
+                    widthFraction = 1f,
+                    fixedHeight = cardHeight,
+                    outerPadding = 0.dp
                 )
 
                content.type ==  ContentType.VIDEO -> VideoCard(
                     modifier = Modifier.fillMaxSize(),
                     contentVideo = content,
-                    onClick = onOpenMedia
+                    onClick = onOpenMedia,
+                    widthFraction = 1f,
+                    fixedHeight = cardHeight,
+                    outerPadding = 0.dp
                 )
 
                 content.type == ContentType.AUDIO -> AudioPlayerUIState(
                     noteContentModel = content,
-                    onDelete = { onDelete() }
+                    onDelete = { onDelete() },
+                    cardPadding = 0.dp
                 )
 
                 content.type.isDoc()  -> {
                         InlineBookFileWidget(
                             media = content,
                             modifier = Modifier.fillMaxSize(),
-                            onOpenFull = onOpenMedia
+                            onOpenFull = onOpenMedia,
+                            widthFraction = 1f,
+                            fixedHeight = cardHeight,
+                            outerPadding = PaddingValues(0.dp)
                         )
-                }
-
-                content.type == ContentType.LINK -> {
-                    val link = content as? NoteContentModel.Link
-                    val uriHandler = LocalUriHandler.current
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable {
-                                link?.url?.takeIf { it.isNotBlank() }
-                                    ?.let { runCatching { uriHandler.openUri(it) } }
-                            }
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Link,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = link?.url.orEmpty().ifEmpty { "Link" },
-                            style = TextStyle(color = colors.accent, fontSize = 15.sp),
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                    }
-                }
-
-                content.type ==  ContentType.LOCATION -> {
-                    val location = content as? NoteContentModel.Location
-                    val uriHandler = LocalUriHandler.current
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable {
-                                location?.let {
-                                    runCatching {
-                                        uriHandler.openUri("geo:${it.latitude},${it.longitude}")
-                                    }
-                                }
-                            }
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.LocationOn,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = location?.address?.takeIf { it.isNotBlank() }
-                                ?: location?.let { "${it.latitude}, ${it.longitude}" }
-                                ?: "Location",
-                            style = TextStyle(color = colors.onSurface, fontSize = 15.sp),
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                    }
                 }
 
                 else -> MasterNodePlaceholder(node.kind.name)
             }
         }
+
+        // 🔧 24-Sep-2026 — links and places are their own content types, not media, so they get their own branches
+        content is NoteContentModel.Link -> {
+            val uriHandler = LocalUriHandler.current
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable {
+                        content.url.takeIf { it.isNotBlank() }
+                            ?.let { runCatching { uriHandler.openUri(it) } }
+                    }
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Link,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = content.url.ifEmpty { "Link" },
+                    style = TextStyle(color = colors.accent, fontSize = 15.sp),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        }
+
+        content is NoteContentModel.Location -> {
+            val uriHandler = LocalUriHandler.current
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable {
+                        runCatching {
+                            uriHandler.openUri("geo:${content.latitude},${content.longitude}")
+                        }
+                    }
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.LocationOn,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = content.address?.takeIf { it.isNotBlank() }
+                        ?: "${content.latitude}, ${content.longitude}",
+                    style = TextStyle(color = colors.onSurface, fontSize = 15.sp),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        }
+
+        // 🔄 24-Sep-2026 — a widget waiting for its content (it may still be on its way from the other device) draws nothing
+        node.contentId != null -> Unit
+
+        else -> MasterNodePlaceholder(node.kind.name)
     }
 }
 

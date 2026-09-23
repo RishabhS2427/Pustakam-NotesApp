@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,6 +42,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration   // 🔧 20-Jul-2026: device-relative size
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.app.pustakam.android.extension.actionIconButtonBackground
 import com.app.pustakam.android.screen.bookUIView.BookPageContent
@@ -71,6 +73,10 @@ fun InlineBookFileWidget(
     onOpenFull: () -> Unit = {},
     onShowActions: (Boolean) -> Unit = {},
     onPageChanged: (Int) -> Unit = {},
+    // 🧱 24-Sep-2026 — the master canvas sizes and spaces the card itself; the defaults keep the note editor as it was
+    widthFraction: Float = 0.75f,
+    fixedHeight: Dp? = null,
+    outerPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     var pages by remember(media.id) { mutableStateOf<List<BookPage>>(emptyList()) }
@@ -94,9 +100,9 @@ fun InlineBookFileWidget(
     val cardHeight = (screenHeightDp * 0.42f).dp.coerceIn(260.dp, 460.dp)
     Box(
         modifier = modifier
-            .fillMaxWidth(0.75f)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .height(cardHeight)
+            .fillMaxWidth(widthFraction)
+            .padding(outerPadding)
+            .height(fixedHeight ?: cardHeight)
             .background(NotebookCover,cornerShape )
     ) {
         Row(Modifier.fillMaxSize().padding(2.dp)) {

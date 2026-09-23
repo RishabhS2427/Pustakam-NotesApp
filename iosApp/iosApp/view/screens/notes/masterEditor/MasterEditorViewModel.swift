@@ -18,7 +18,15 @@ final class MasterEditorViewModel: ObservableObject {
     private let contentBridge = NoteContentBridge()
     private var dirtyContentIds = Set<String>()
     private var hydratedNoteId: String?
+    private var pendingStored: (noteId: String, nodes: [CanvasNode])?
     private var contentSyncHandle: Closeable?
+    private var remoteCanvasHandle: Closeable?
+    private var canvasReady = false
+    // 🔄 24-Sep-2026 — another device's canvas waits here while a finger is busy; what this device touches meanwhile stays its own
+    private var pendingRemote: [CanvasNode]?
+    private var touchedWhilePending = Set<String>()
+    // 🔄 24-Sep-2026 — the board as it was when a drag or resize began, so letting go without moving stamps nothing
+    private var gestureStart: CanvasDocument?
 
     private var commands: CanvasCommands { CanvasCommands.shared }
 
@@ -38,6 +46,7 @@ final class MasterEditorViewModel: ObservableObject {
 
     deinit {
         contentSyncHandle?.close()
+        remoteCanvasHandle?.close()
         contentBridge.dispose()
     }
 
@@ -98,6 +107,7 @@ final class MasterEditorViewModel: ObservableObject {
         }
         hydratedNoteId = note.id
         observeExternalContents(noteId: note.id)
+        observeRemoteCanvas(noteId: note.id)
         hydrateCanvas(noteId: note.id)
     }
 
@@ -113,8 +123,39 @@ final class MasterEditorViewModel: ObservableObject {
         }
     }
 
+    // 🔄 24-Sep-2026 — a widget whose content was deleted elsewhere is dropped before the board is read
     private func hydrateCanvas(noteId: String) {
-        let contents = textContents
+        canvasBridge.pruneOrphans { [weak self] in
+            self?.readStoredCanvas(noteId: noteId)
+        }
+    }
+
+    // 🔄 24-Sep-2026 — another device's canvas for this note, applied once no finger is busy
+    private func observeRemoteCanvas(noteId: String) {
+        remoteCanvasHandle?.close()
+        remoteCanvasHandle = canvasBridge.observeRemoteCanvas(noteId: noteId) { [weak self] nodes in
+            guard let self else { return }
+            self.pendingRemote = nodes
+            self.touchedWhilePending.removeAll()
+            self.adoptPendingRemote()
+        }
+    }
+
+    private func adoptPendingRemote() {
+        guard let nodes = pendingRemote, canvasReady, commands.canAdoptRemote(state: canvas) else { return }
+        let keep = touchedWhilePending
+        pendingRemote = nil
+        touchedWhilePending.removeAll()
+        dispatchCanvas(commands.adoptRemote(nodes: nodes, keepLocal: keep), housekeeping: true)
+        refreshMissingTexts()
+    }
+
+    /// 📄 23-Sep-2026 — a page now CARRIES contents instead of standing for one, so a stored
+    /// canvas takes one of three paths: an old one is upgraded in place (pages keep their id,
+    /// name and rect), an empty one is laid out by CanvasPaginator through the reading-mode
+    /// grouping, and a current one only has to be guaranteed at least one page. Mirrors
+    /// MasterEditorViewModel.applyCanvas on Android.
+    private func readStoredCanvas(noteId: String) {
         canvasBridge.readCanvas(noteId: noteId) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -122,24 +163,58 @@ final class MasterEditorViewModel: ObservableObject {
                 self.isLoading = true
             case .success(let document):
                 self.isLoading = false
-                var nodes: [CanvasNode] = document?.nodes ?? []
-                if nodes.isEmpty {
-                    nodes = self.seedNodes(noteId: noteId, contents: contents)
-                    self.canvasBridge.saveAll(noteId: noteId, nodes: nodes)
-                    // a note built by the "create empty note" path exists only in memory until
-                    // now; write it so the canvas has a real parent and refresh() can find it
-                    self.saveNote()
+                let stored: [CanvasNode] = document?.nodes ?? []
+                // pages are cut to the fitted screen, so a canvas waits for the board's size
+                if self.canvas.viewport.widthPx > 0 {
+                    self.lay(noteId: noteId, stored: stored)
+                } else {
+                    self.pendingStored = (noteId: noteId, nodes: stored)
                 }
-                self.readViewport(noteId: noteId, nodes: nodes)
             case .failure(let error):
                 self.isLoading = false
                 self.errorMessage = error.message
                 self.hydratedNoteId = nil
-                self.render(nodes: self.seedNodes(noteId: noteId, contents: contents), viewport: nil)
+                self.render(nodes: self.laidOut(noteId: noteId, stored: []), viewport: nil)
             case .idle:
                 break
             }
         }
+    }
+
+    private func lay(noteId: String, stored: [CanvasNode]) {
+        let rewritten = stored.isEmpty
+            || CanvasPaginator.shared.needsUpgrade(nodes: stored)
+            || CanvasPaginator.shared.pagesMissing(nodes: stored)
+        let nodes = laidOut(noteId: noteId, stored: stored)
+        if rewritten {
+            canvasBridge.saveAll(noteId: noteId, nodes: nodes)
+        }
+        // 🔄 24-Sep-2026 — no saveNote() here any more: the seeded text block already writes a brand-new note, and re-saving an existing one on open would stamp it
+        readViewport(noteId: noteId, nodes: nodes)
+    }
+
+    private func laidOut(noteId: String, stored: [CanvasNode]) -> [CanvasNode] {
+        let page = stored.first { $0.isPage }
+        let width = page?.rect.width ?? commands.fittedPageWidth(state: canvas)
+        let height = page?.rect.height ?? commands.fittedPageHeight(state: canvas)
+        let paginator = CanvasPaginator.shared
+        if stored.isEmpty {
+            seedFirstTextContent(noteId: noteId)
+            return paginator.build(contents: noteContents, pageWidth: width, pageHeight: height)
+                .nodes
+        }
+        if paginator.needsUpgrade(nodes: stored) {
+            return paginator.upgrade(nodes: stored, pageWidth: width, pageHeight: height).nodes
+        }
+        return paginator.ensurePageIn(nodes: stored, pageWidth: width, pageHeight: height).nodes
+    }
+
+    /// An empty note still needs one text row, otherwise its first page has nothing to type into.
+    private func seedFirstTextContent(noteId: String) {
+        guard noteContents.isEmpty else { return }
+        addContent(
+            NoteContentObjectHelper.shared.createText(noteId: noteId, positionedAt: 0, text: "")
+        )
     }
 
     private func readViewport(noteId: String, nodes: [CanvasNode]) {
@@ -159,12 +234,17 @@ final class MasterEditorViewModel: ObservableObject {
     private func render(nodes: [CanvasNode], viewport: Viewport?) {
         texts = buildTexts(nodes: nodes, contents: textContents, keeping: texts)
         canvas = commands.loaded(state: canvas, nodes: nodes, viewport: viewport)
+        canvasReady = true
+        // 🔄 24-Sep-2026 — a canvas that arrived meanwhile lands first; contents still without a widget get one after it
+        adoptPendingRemote()
+        adoptOrphanContents()
     }
 
+    // 🔄 24-Sep-2026 — housekeeping, never a user edit: a content that arrived without a widget gets one
     private func adoptOrphanContents() {
         guard commands.pageForSpawn(state: canvas) != nil else { return }
         for content in noteContents where canvas.document.nodeForContent(contentId: content.id) == nil {
-            spawnWidgetNode(kind: content.type, contentId: content.id)
+            spawnWidgetNode(kind: content.type, contentId: content.id, housekeeping: true)
         }
     }
 
@@ -175,7 +255,7 @@ final class MasterEditorViewModel: ObservableObject {
             textContents.map { ($0.id, $0) },
             uniquingKeysWith: { _, last in last }
         )
-        for node in canvas.document.nodes where node.isText {
+        for node in canvas.document.nodes where node.isTextWidget {
             guard let contentId = node.contentId,
                   let content = byContentId[contentId],
                   !dirtyContentIds.contains(contentId) else { continue }
@@ -194,29 +274,13 @@ final class MasterEditorViewModel: ObservableObject {
         if changed { texts = updated }
     }
 
-    private func seedNodes(
-        noteId: String,
-        contents: [NoteContentModel.TextContent]
-    ) -> [CanvasNode] {
-        if contents.isEmpty {
-            let seed = NoteContentObjectHelper.shared.createText(
-                noteId: noteId,
-                positionedAt: 0,
-                text: ""
-            )
-            addContent(seed)
-            return commands.stackedTextNodes(contentIds: [seed.id])
-        }
-        return commands.stackedTextNodes(contentIds: contents.map { $0.id })
-    }
-
     private func buildTexts(
         nodes: [CanvasNode],
         contents: [NoteContentModel.TextContent],
         keeping existing: [String: MasterTextState] = [:]
     ) -> [String: MasterTextState] {
         var built: [String: MasterTextState] = [:]
-        for node in nodes where node.isText {
+        for node in nodes where node.isTextWidget {
             guard let contentId = node.contentId else { continue }
             if let live = existing[node.id] {
                 built[node.id] = live
@@ -342,44 +406,66 @@ final class MasterEditorViewModel: ObservableObject {
     // MARK: - Canvas
 
     func onCanvasIntent(_ intent: CanvasEditorIntent) {
-        let before = canvas
-        canvas = CanvasEditorReducer.shared.reduce(state: before, intent: intent)
-        persistCanvas(before: before, intent: intent)
+        dispatchCanvas(intent, housekeeping: false)
     }
 
-    private func persistCanvas(before: CanvasEditorState, intent: CanvasEditorIntent) {
+    // 🔄 24-Sep-2026 — housekeeping (a fit, a measure, a placed orphan, another device's canvas) is written but never stamps the note
+    private func dispatchCanvas(_ intent: CanvasEditorIntent, housekeeping: Bool) {
+        let before = canvas
+        canvas = CanvasEditorReducer.shared.reduce(state: before, intent: intent)
+        // 📄 leaving edit mode — a tap on paper or bare canvas — puts the keyboard away
+        if before.editingNodeId != nil && canvas.editingNodeId == nil {
+            keyboardDismissToken &+= 1
+        }
+        if commands.gestureStarted(before: before, next: canvas) {
+            gestureStart = canvas.document
+        }
+        let edited = !housekeeping && commands.editsLayout(
+            before: before,
+            next: canvas,
+            intent: intent,
+            gestureStart: gestureStart
+        )
+        if commands.gestureEnded(before: before, next: canvas) {
+            gestureStart = nil
+        }
+        persistCanvas(before: before, intent: intent, edited: edited)
+        if let pending = pendingStored, canvas.viewport.widthPx > 0 {
+            pendingStored = nil
+            lay(noteId: pending.noteId, stored: pending.nodes)
+        }
+        adoptPendingRemote()
+    }
+
+    /// 📄 23-Sep-2026 — one rule for every intent: whatever the reduce changed is written, what
+    /// it removed is deleted, and the note's content order follows the canvas when that changed.
+    /// CanvasCommands decides what "changed" means, so Android writes exactly the same rows.
+    private func persistCanvas(before: CanvasEditorState, intent: CanvasEditorIntent, edited: Bool) {
         guard let noteId = note?.id else { return }
-        if commands.isEndDrag(intent: intent) {
-            guard let dragging = before.draggingNodeId,
-                  let node = canvas.document.nodeById(nodeId: dragging) else { return }
-            // full upsert, not move(): a drop can also have changed the parent page
-            canvasBridge.save(noteId: noteId, node: node)
-            for child in canvas.document.descendantsOf(nodeId: node.id) {
-                canvasBridge.save(noteId: noteId, node: child)
+        let changed: [CanvasNode] = commands.nodesToSave(before: before, next: canvas)
+        let removed: [String] = commands.removedNodeIds(before: before, next: canvas)
+        if pendingRemote != nil {
+            touchedWhilePending.formUnion(changed.map { $0.id })
+            touchedWhilePending.formUnion(removed)
+        }
+        if edited {
+            // 🔄 the rows land first; only then is the note stamped, so the push that follows carries them
+            canvasBridge.saveEdit(noteId: noteId, nodes: changed, removedIds: removed) { [weak self] in
+                self?.onEditorIntent(EditorCommands.shared.saveRequested())
             }
-        } else if let reparentedId = commands.reparentedNodeId(intent: intent) {
-            guard let node = canvas.document.nodeById(nodeId: reparentedId) else { return }
-            canvasBridge.save(noteId: noteId, node: node)
-        } else if let added = commands.addedNode(intent: intent) {
-            canvasBridge.save(noteId: noteId, node: added)
-        } else if let removedId = commands.removedNodeId(intent: intent) {
-            canvasBridge.remove(nodeId: removedId)
-        } else if let resizedId = commands.resizedNodeId(intent: intent) {
-            guard let node = canvas.document.nodeById(nodeId: resizedId) else { return }
-            canvasBridge.resize(nodeId: node.id, width: node.rect.width, height: node.rect.height)
-        } else if let fittedId = commands.fittedPageId(state: canvas, intent: intent) {
-            if let page = canvas.document.nodeById(nodeId: fittedId),
-               page.rect != before.document.nodeById(nodeId: fittedId)?.rect {
-                canvasBridge.resize(
-                    nodeId: page.id,
-                    width: page.rect.width,
-                    height: page.rect.height
-                )
+        } else {
+            if !changed.isEmpty {
+                canvasBridge.saveAll(noteId: noteId, nodes: changed)
             }
-            if canvas.viewport != before.viewport {
-                canvasBridge.saveViewport(noteId: noteId, viewport: canvas.viewport)
+            for removedId in removed {
+                canvasBridge.remove(nodeId: removedId)
             }
-        } else if commands.affectsViewport(intent: intent) {
+        }
+        // 🔄 only a user's edit re-orders the note; housekeeping and another device's canvas never re-stamp it
+        if edited && commands.orderChanged(before: before, next: canvas) {
+            applyCanvasOrderToNote()
+        }
+        if canvas.viewport != before.viewport && commands.affectsViewport(intent: intent) {
             canvasBridge.saveViewport(noteId: noteId, viewport: canvas.viewport)
         }
     }
@@ -401,56 +487,88 @@ final class MasterEditorViewModel: ObservableObject {
 
     // MARK: - Nodes
 
+    // 📄 24-Sep-2026 — a new page is totally blank: fresh paper beside the last page, fitted to the screen, nothing on it
     func addPage() {
+        guard note != nil else { return }
+        let page = addBarePage(housekeeping: false)
+        onCanvasIntent(commands.selectNode(nodeId: page.id))
+    }
+
+    private func addBarePage(housekeeping: Bool) -> CanvasNode {
+        let page = commands.pageNode(state: canvas)
+        dispatchCanvas(commands.addNode(node: page), housekeeping: housekeeping)
+        return page
+    }
+
+    /// A text block is a widget on the current page now — it no longer costs a whole page.
+    func addTextBlock() {
         guard let note else { return }
+        guard let page = commands.pageForSpawn(state: canvas) else { return }
         let content = NoteContentObjectHelper.shared.createText(
             noteId: note.id,
             positionedAt: Double(noteContents.count),
             text: ""
         )
-        let page = commands.pageNode(state: canvas, contentId: content.id)
+        let node = commands.widgetIn(
+            state: canvas,
+            page: page,
+            kind: ContentType.text,
+            contentId: content.id
+        )
         addContent(content)
-        texts[page.id] = MasterTextState.companion.of(
+        texts[node.id] = MasterTextState.companion.of(
             document: RichTextCodec.shared.documentFrom(content: content)
         )
-        onCanvasIntent(commands.addNode(node: page))
-        onCanvasIntent(commands.selectNode(nodeId: page.id))
+        onCanvasIntent(commands.addNode(node: node))
+        onCanvasIntent(commands.setEditing(nodeId: node.id))
     }
 
     /// A nil content is normal: the attach menu adds an empty table/drawing widget that has no
     /// note content behind it yet. Mirrors MasterEditorViewModel.addWidget on Android.
     func addWidget(kind: ContentType, content: NoteContentModel? = nil) {
         guard note != nil else { return }
-        if kind == ContentType.text {
-            addPage()
+        if kind == ContentType.text && content == nil {
+            addTextBlock()
             return
         }
         if let content { addContent(content) }
         spawnWidgetNode(kind: kind, contentId: content?.id)
+        if kind == ContentType.text { refreshMissingTexts() }
     }
 
-    /// Split out so captured media can land on the canvas without re-adding its content.
-    private func spawnWidgetNode(kind: ContentType, contentId: String?) {
-        guard let page = commands.pageForSpawn(state: canvas) else {
-            addPage()
-            spawnWidgetNode(kind: kind, contentId: contentId)
-            return
-        }
+    // 📄 24-Sep-2026 — a new widget lands on the page the user is on, and that page scrolls to show it
+    private func spawnWidgetNode(kind: ContentType, contentId: String?, housekeeping: Bool = false) {
+        let page = commands.pageForSpawn(state: canvas) ?? addBarePage(housekeeping: housekeeping)
         let node = commands.widgetIn(
             state: canvas,
             page: page,
             kind: kind,
             contentId: contentId
         )
-        onCanvasIntent(commands.addNode(node: node))
+        dispatchCanvas(commands.addNode(node: node), housekeeping: housekeeping)
+        if !housekeeping {
+            dispatchCanvas(commands.revealEnd(pageId: page.id), housekeeping: true)
+        }
     }
 
+    /// 📄 the platform reports what a measured widget's content actually is; a text widget that
+    /// grew pushes whatever is under it down, and the page scrolls further — never spills.
+    func onWidgetMeasured(nodeId: String, height: CGFloat) {
+        guard let node = canvas.document.nodeById(nodeId: nodeId), node.isWidget else { return }
+        let measured = Float(height)
+        guard measured > 0, abs(node.rect.height - measured) >= Self.measureEpsilon else { return }
+        dispatchCanvas(commands.widgetMeasured(nodeId: nodeId, height: measured), housekeeping: true)
+    }
+
+    /// Sub-pixel measurement noise must not start a resize/measure ping-pong.
+    private static let measureEpsilon: Float = 1.5
+
+    // 🔄 24-Sep-2026 — the content goes first, so the re-order the removal triggers can never save it back
     func deleteNode(nodeId: String) {
         let contentId = canvas.document.nodeById(nodeId: nodeId)?.contentId
+        if let contentId { removeContent(id: contentId) }
         onCanvasIntent(commands.removeNode(nodeId: nodeId))
         texts[nodeId] = nil
-        guard let contentId else { return }
-        removeContent(id: contentId)
     }
 
     func onCapabilityState(_ next: EditorCapabilityState) {
@@ -541,13 +659,17 @@ final class MasterEditorViewModel: ObservableObject {
 
     // MARK: - Conversion
 
+    // 🔄 24-Sep-2026 — the rebuilt board replaces the old one in a single edit: new rows written, old ones deleted, then the note travels
     func rebuildLayoutFromNote() {
-        guard let noteId = note?.id else { return }
-        let document = NoteCanvasConverter.shared.toCanvas(contents: noteContents)
+        guard note != nil else { return }
+        let page = canvas.document.pages.first
+        let document = CanvasPaginator.shared.build(
+            contents: noteContents,
+            pageWidth: page?.rect.width ?? commands.fittedPageWidth(state: canvas),
+            pageHeight: page?.rect.height ?? commands.fittedPageHeight(state: canvas)
+        )
         onCanvasIntent(commands.replaceDocument(document: document))
         texts = buildTexts(nodes: document.nodes, contents: textContents)
-        canvasBridge.removeAll(noteId: noteId)
-        canvasBridge.saveAll(noteId: noteId, nodes: document.nodes)
     }
 
     func applyCanvasOrderToNote() {

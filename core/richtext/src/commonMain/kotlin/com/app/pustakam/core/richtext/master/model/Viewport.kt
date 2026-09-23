@@ -18,6 +18,12 @@ data class CanvasRect(
     fun intersects(other: CanvasRect): Boolean =
         x < other.right && other.x < right && y < other.bottom && other.y < bottom
 
+    fun overlapArea(other: CanvasRect): Float {
+        val overlapWidth = minOf(right, other.right) - maxOf(x, other.x)
+        val overlapHeight = minOf(bottom, other.bottom) - maxOf(y, other.y)
+        return if (overlapWidth > 0f && overlapHeight > 0f) overlapWidth * overlapHeight else 0f
+    }
+
     fun contains(pointX: Float, pointY: Float): Boolean =
         pointX in x..right && pointY in y..bottom
 

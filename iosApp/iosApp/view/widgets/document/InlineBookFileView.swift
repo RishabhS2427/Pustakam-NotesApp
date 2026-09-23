@@ -16,6 +16,8 @@ struct InlineBookFileView: View {
     var onSave: () -> Void = {}
     var onShare: () -> Void = {}
     var onPageChange: (Int32)-> Void = {_ in}
+    // 🧱 24-Sep-2026 — the master canvas gives the card its whole height, cover included; nil keeps the device-sized card
+    var cardHeight: CGFloat? = nil
 
     @State private var pages: [BookPageItem] = []
     @State private var building = true
@@ -69,7 +71,7 @@ struct InlineBookFileView: View {
                                               bottomTrailingRadius: 12, topTrailingRadius: 12))
         }
         // 🔧 20-Jul-2026: size to the device — ~42% of screen height, clamped to a sane range
-        .frame(height: min(max(UIScreen.main.bounds.height * 0.42, 260), 400))
+        .frame(height: paperHeight)
         .padding(6)
         .background(RoundedRectangle(cornerRadius: 16).fill(NotebookPalette.cover))
         .onAppear(perform: buildPages)
@@ -77,6 +79,11 @@ struct InlineBookFileView: View {
         .onChange(of: media.id) { _, _ in buildPages() }
         .onChange(of: media.updatedAt) { _, _ in buildPages() }
     }
+    private var paperHeight: CGFloat {
+        if let cardHeight { return max(cardHeight - 12, 0) }
+        return min(max(UIScreen.main.bounds.height * 0.42, 260), 400)
+    }
+
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: iconNameForContentType(media.type))

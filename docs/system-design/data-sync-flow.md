@@ -230,6 +230,10 @@ incoming change from ever arriving — sync looked dead while the network was fi
 - `notesDao.selectDirtyNotes(SyncConfig.PUSH_BATCH + attempted.size)`, minus an `attempted` set, so
   **every note gets exactly one attempt per cycle**. Without that, a batch the server keeps
   conflicting on made the same rows come back forever and the loop hammered the rate limiter.
+- `selectDirtyNotes` attaches each live note's canvas rows as `Note.canvas` (`CanvasDao.wireNodes`),
+  so master-editor pages and widget positions travel with the note (24-Sep-2026). A layout edit
+  makes the note dirty through `CanvasDao.applyEdit` — rows and `markNoteDirtyForMedia` in one
+  transaction.
 - `NoteWireMapper.toWire(note)` for each.
 - `SyncPushRequest(notes, lastPulledAt)` → `apiClient.syncPush(userId, request)`.
 - The response has three lists, handled separately:
@@ -252,6 +256,9 @@ incoming change from ever arriving — sync looked dead while the network was fi
   `applyIncoming` always refused to overwrite an unpushed local edit, but the watermark used to
   advance past it anyway, and the server never offers the same note twice.
 - `notesDao.commitPulledPage(...)` writes the page and the watermark together.
+- `notesDao.applyServerNote` also replaces the note's canvas rows when the pulled note carries a
+  non-empty `canvas` (`CanvasDao.replaceFromWire`); a deleted note drops them, and a note with no
+  `canvas` leaves this device's layout alone.
 - If it stalled, `noteStalledOn(id)`; after `SyncConfig.MAX_STALLED_CYCLES` (3) `canApplyOver`
   gives up and takes the server copy, so one unsendable note cannot hold the whole inbound stream.
 - Finally `notesDao.purgeAckedTombstones(since)`.
@@ -265,7 +272,10 @@ incoming change from ever arriving — sync looked dead while the network was fi
 
 ### Telling an open screen
 
-`publishToOpenEditor(note)` → `noteBus.publishContents(note.id, note.contents)`.
+`publishToOpenEditor(note)` → `noteBus.publishContents(note.id, note.contents)`. A note that carries
+a canvas publishes it FIRST (`noteBus.publishRemoteCanvas`, observed through
+`ObserveRemoteCanvasUseCase`), so an open master editor has a place for every new content before
+the contents land.
 
 **File:** `feature/notes/.../repositoryImpl/NoteSyncRepository.kt` — a `MutableSharedFlow` bus with
 `publishContents()` / `observeContents(noteId)`. Writing the row is not enough: an editor already on
@@ -490,7 +500,8 @@ exact.
 | `toStoredContent(content, noteId, timestamp)` | Per block: mints `_id` if absent, forces `noteId`, defaults `position`, and drops `CLIENT_ONLY_CONTENT_FIELDS = ['thumbnailPath', 'id']`. |
 | `keepKnownAsset(stored, existingById)` | **A block never loses its uploaded file.** If the incoming block has no `assetId` but the stored one does, copy `assetId`, `url`, `checksum`, `mimeType`, `sizeBytes` back. This covers a phone that saved before its own upload finished. |
 | `toWireContent(content)` | Emits the content id as **both `_id` and `id`** — the compat shim for builds that predate the `@SerialName("_id")` fix. Delete once every install is past that build. |
-| `toWireNote(note)` | The pull shape. Always sets `syncStatus: SYNCED` and `isSynced: true`. |
+| `toWireNote(note)` | The pull shape. Always sets `syncStatus: SYNCED` and `isSynced: true`. Emits `canvas` only when the note has one. |
+| `canvasFor(body, existing)` | A push without `canvas` keeps the stored layout, so an older build never erases it; a deleted note stores `null`. |
 | `toWireSummary(note)` | Mirrors `Notes.kt toSummary()` so both platforms render the list identically. |
 
 `clampClientTimestamp` (`lib/time.js`) is what stops a device with a wrong clock stamping a note in
@@ -513,6 +524,8 @@ exact.
     producing while it rejected every note it owned.
 - `baseContent` requires `_id`, `noteId`, `position` (finite number), `createdAt`, `updatedAt`.
 - `noteBodySchema` additionally `.refine()`s that content `_id`s are **unique within one note**.
+- `canvas` is an optional `canvasNodeSchema[]` (`.passthrough()`; `id`, `kind`, `role`, `x`, `y`,
+  `width`, `height` required), at most 5000 per note, with ids unique within the note.
 
 `PustakmServer/validation/syncSchemas.js` holds `syncPushSchema` and `syncPullSchema`.
 

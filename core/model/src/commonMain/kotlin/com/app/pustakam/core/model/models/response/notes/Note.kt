@@ -36,6 +36,8 @@ data class Note(
     val deletedAt: String? = null,
     val serverUpdatedAt: Long? = null,
     val contents: List<NoteContentModel> = emptyList(),
+    // 🔄 24-Sep-2026 — the master editor's pages and widgets; null means "this copy carries no layout", never "no layout"
+    val canvas: List<NoteCanvasNode>? = null,
     ) {
     /** Swift-friendly copy helpers — Kotlin data-class copy() does not export
      *  usable default arguments to Swift, so immutable edits go through these.

@@ -13,4 +13,9 @@ interface INoteSyncRepository {
     fun publishContents(noteId: String, contents: List<NoteContentModel>)
 
     fun publishCanvasNodes(noteId: String, nodes: List<CanvasNode>)
+
+    // 🔄 24-Sep-2026 — a canvas another device saved, for a master editor that is already open
+    fun observeRemoteCanvas(noteId: String): Flow<List<CanvasNode>>
+
+    fun publishRemoteCanvas(noteId: String, nodes: List<CanvasNode>)
 }

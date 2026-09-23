@@ -93,6 +93,8 @@ fun VideoCard(
     onShowActions: (Boolean) -> Unit = {},
     widthFraction: Float = .7f,
     fixedHeight: Dp? = null,
+    // 🧱 24-Sep-2026 — the master canvas spaces its cards itself
+    outerPadding: Dp = 8.dp,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     val viewModel: PlayMediaViewModel = viewModel()
@@ -110,7 +112,7 @@ fun VideoCard(
         Card(
             modifier = Modifier.fillMaxWidth(widthFraction)
                 .then(if (fixedHeight != null) Modifier.height(fixedHeight) else Modifier.requiredHeight(cardHeight))
-                .padding(8.dp)
+                .padding(outerPadding)
                 .clickable{ onClick() },
             elevation =CardDefaults.cardElevation(defaultElevation = 6.dp),
             shape = RoundedCornerShape(14.dp),

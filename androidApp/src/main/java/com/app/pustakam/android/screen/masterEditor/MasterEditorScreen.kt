@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
@@ -97,18 +98,29 @@ fun MasterEditorScreen(
         }
     }
 
+    // 📄 a note opens on its LAST page, fitted to the screen and scrolled to its end — the same
+    //   as tapping that page. The keyboard stays down until a text widget is tapped.
     var autoFocused by remember(noteId) { mutableStateOf(false) }
-    val autoFocusId = CanvasCommands.lastTextNodeId(canvas)
+    val autoFocusId = CanvasCommands.lastPageId(canvas)
 
-    LaunchedEffect(autoFocusId, canvas.viewport.widthPx) {
+    LaunchedEffect(autoFocusId, canvas.viewport.widthPx, uiState.canvasReady) {
         if (!autoFocused &&
+            uiState.canvasReady &&
             autoFocusId != null &&
             canvas.viewport.widthPx > 0f &&
             canvas.editingNodeId == null
         ) {
             autoFocused = true
-            viewModel.onCanvasIntent(CanvasCommands.selectNode(autoFocusId))
+            viewModel.onCanvasIntent(CanvasCommands.focusPage(autoFocusId))
         }
+    }
+
+    // 📄 leaving edit mode — a tap on paper, on bare canvas, or the toolbar's dismiss — puts the
+    //   keyboard away; editingNodeId going null is the only signal, so it is watched here
+    val focusManager = LocalFocusManager.current
+    val editingId = canvas.editingNodeId
+    LaunchedEffect(editingId) {
+        if (editingId == null) focusManager.clearFocus()
     }
 
     val capturedPaths = imageDataViewModel.paths.collectAsStateWithLifecycle().value
@@ -142,7 +154,9 @@ fun MasterEditorScreen(
         MasterCanvas(
             state = canvas,
             onIntent = viewModel::onCanvasIntent,
-            onRename = viewModel::renameNode
+            onRename = viewModel::renameNode,
+            onMeasured = viewModel::onWidgetMeasured,
+            keyboardInsetPx = imeHeightPx
         ) { node, isEditing ->
             val nodeContent = uiState.note?.contents?.firstOrNull { it.id == node.contentId }
             MasterNodeContent(
@@ -361,8 +375,19 @@ fun MasterEditorScreen(
                             }
                             .padding(horizontal = 20.dp, vertical = 14.dp)
                     )
+                    Text(
+                        text = "New page",
+                        style = TextStyle(color = colors.onSurface, fontSize = 16.sp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showAttach = false
+                                viewModel.addPage()
+                            }
+                            .padding(horizontal = 20.dp, vertical = 14.dp)
+                    )
                     listOf(
-                        "New page" to ContentType.TEXT,
+                        "Text block" to ContentType.TEXT,
                         "Table" to ContentType.TABLE,
                         "Drawing" to ContentType.DRAWING
                     ).forEach { (label, kind) ->

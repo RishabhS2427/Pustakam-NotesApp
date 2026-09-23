@@ -11,6 +11,8 @@ struct iOSApp: App {
 
         FirebaseApp.configure()
         KoinKt.doInitKoin(appDeclaration: {_ in})
+        // 📐 24-Sep-2026 — once per install every stored canvas moves to the compact layout
+        CanvasLayoutUpgrade.runOnce()
         // 🔄 20-Aug-2026 sync: BGTaskScheduler.register MUST happen before launch finishes
         SyncController.shared.registerBackgroundTask()
         SyncController.shared.start()
@@ -98,6 +100,24 @@ private struct AppRootView: View {
     }
 }
 
+
+// 📐 24-Sep-2026 — the adapter is held until the upgrade finishes, or closing it would cancel the work
+enum CanvasLayoutUpgrade {
+    private static let doneKey = "canvas_layout_compact_v1"
+    private static var running: CanvasBridgeAdapter?
+
+    static func runOnce() {
+        guard !UserDefaults.standard.bool(forKey: doneKey), running == nil else { return }
+        let adapter = CanvasBridgeAdapter()
+        running = adapter
+        let bounds = UIScreen.main.bounds
+        let paperWidth = Float(min(bounds.width, bounds.height)) - CanvasEditorKt.PAGE_SCREEN_MARGIN * 2
+        adapter.upgradeLayouts(unitScale: 1, maxPaperWidth: paperWidth) { upgraded in
+            if upgraded { UserDefaults.standard.set(true, forKey: doneKey) }
+            DispatchQueue.main.async { running = nil }
+        }
+    }
+}
 
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {

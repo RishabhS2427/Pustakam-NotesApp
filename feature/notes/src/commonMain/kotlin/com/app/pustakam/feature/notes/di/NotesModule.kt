@@ -18,6 +18,9 @@ import com.app.pustakam.feature.notes.domain.usecase.ClearSelectedNoteContentUse
 import com.app.pustakam.feature.notes.domain.usecase.MoveCanvasNodeUseCase
 import com.app.pustakam.feature.notes.domain.usecase.PruneCanvasOrphansUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ObserveCanvasNodesUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ObserveRemoteCanvasUseCase
+import com.app.pustakam.feature.notes.domain.usecase.SaveCanvasEditUseCase
+import com.app.pustakam.feature.notes.domain.usecase.UpgradeCanvasLayoutsUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ObserveNoteContentsUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ReadCanvasUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ReadCanvasViewportUseCase
@@ -88,6 +91,9 @@ fun notesModule(): Module = module {
     factory<ReadCanvasUseCase> { ReadCanvasUseCase() }
     factory<ObserveNoteContentsUseCase> { ObserveNoteContentsUseCase() }
     factory<ObserveCanvasNodesUseCase> { ObserveCanvasNodesUseCase() }
+    factory<ObserveRemoteCanvasUseCase> { ObserveRemoteCanvasUseCase() }
+    factory<SaveCanvasEditUseCase> { SaveCanvasEditUseCase() }
+    factory<UpgradeCanvasLayoutsUseCase> { UpgradeCanvasLayoutsUseCase() }
     factory<ReadVisibleCanvasUseCase> { ReadVisibleCanvasUseCase() }
     factory<ReadCanvasViewportUseCase> { ReadCanvasViewportUseCase() }
     factory<SaveCanvasNodeUseCase> { SaveCanvasNodeUseCase() }

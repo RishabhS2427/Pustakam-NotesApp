@@ -24,6 +24,7 @@ import com.app.pustakam.core.common.util.displayMessage
 import com.app.pustakam.core.richtext.codec.RichTextCodec
 import com.app.pustakam.core.richtext.master.model.CanvasDocument
 import com.app.pustakam.core.richtext.master.model.CanvasNode
+import com.app.pustakam.core.filesys.canvas.CanvasPaginator
 import com.app.pustakam.core.richtext.master.model.Viewport
 import com.app.pustakam.core.richtext.master.presentation.CanvasCommands
 import com.app.pustakam.core.richtext.master.presentation.CanvasEditorIntent
@@ -38,10 +39,12 @@ import com.app.pustakam.feature.notes.domain.editor.EditorEffect
 import com.app.pustakam.feature.notes.domain.editor.EditorIntent
 import com.app.pustakam.feature.notes.domain.editor.EditorReducer
 import com.app.pustakam.feature.notes.domain.editor.EditorState
-import com.app.pustakam.feature.notes.domain.usecase.ClearCanvasUseCase
 import com.app.pustakam.feature.notes.domain.usecase.DeleteNoteContentUseCase
 import com.app.pustakam.feature.notes.domain.usecase.MoveCanvasNodeUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ObserveNoteContentsUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ObserveRemoteCanvasUseCase
+import com.app.pustakam.feature.notes.domain.usecase.PruneCanvasOrphansUseCase
+import com.app.pustakam.feature.notes.domain.usecase.SaveCanvasEditUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ReadCanvasUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ReadCanvasViewportUseCase
 import com.app.pustakam.feature.notes.domain.usecase.RemoveCanvasNodeUseCase
@@ -72,6 +75,8 @@ data class MasterEditorUiState(
     val canvas: CanvasEditorState = CanvasEditorState(),
     val texts: Map<String, MasterTextState> = emptyMap(),
     val isLoading: Boolean = false,
+    // 📄 true once the canvas AND its saved viewport are in: only then may the first page be fitted
+    val canvasReady: Boolean = false,
     val capabilities: EditorCapabilityState = EditorCapabilityState(),
     val error: String? = null
 ) {
@@ -84,12 +89,14 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     private val readCanvasViewport by inject<ReadCanvasViewportUseCase>()
     private val saveCanvasNode by inject<SaveCanvasNodeUseCase>()
     private val saveCanvasNodes by inject<SaveCanvasNodesUseCase>()
+    private val saveCanvasEdit by inject<SaveCanvasEditUseCase>()
+    private val observeRemoteCanvas by inject<ObserveRemoteCanvasUseCase>()
+    private val pruneCanvasOrphans by inject<PruneCanvasOrphansUseCase>()
 
     private val moveCanvasNode by inject<MoveCanvasNodeUseCase>()
     private val resizeCanvasNode by inject<ResizeCanvasNodeUseCase>()
     private val renameCanvasNode by inject<RenameCanvasNodeUseCase>()
     private val removeCanvasNode by inject<RemoveCanvasNodeUseCase>()
-    private val clearCanvas by inject<ClearCanvasUseCase>()
     private val saveCanvasViewport by inject<SaveCanvasViewportUseCase>()
     private val readNoteUseCase by inject<ReadNoteUseCase>()
     private val saveNoteUseCase by inject<CreateORUpdateNoteUseCase>()
@@ -99,7 +106,13 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     private val deleteNoteContentUseCase by inject<DeleteNoteContentUseCase>()
     private val observeNoteContents by inject<ObserveNoteContentsUseCase>()
 
-    private var pendingLayoutNodes: List<CanvasNode> = emptyList()
+    private var pendingCanvas: CanvasDocument? = null
+    // 🔄 24-Sep-2026 — another device's canvas waits here while a finger is busy; what this device touches meanwhile stays its own
+    private var pendingRemote: List<CanvasNode>? = null
+    private val touchedWhilePending = mutableSetOf<String>()
+    private var remoteCanvasJob: Job? = null
+    // 🔄 24-Sep-2026 — the board as it was when a drag or resize began, so letting go without moving stamps nothing
+    private var gestureStart: CanvasDocument? = null
     private var pendingMediaPaths: List<Pair<String, ContentType>> = emptyList()
     private var pendingOpen: (() -> Unit)? = null
     private var contentSyncJob: Job? = null
@@ -140,12 +153,36 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         }
     }
 
+    // 🔄 24-Sep-2026 — housekeeping, never a user edit: a content that arrived without a widget gets one
     private fun adoptOrphanContents() {
         val state = _state.value
         if (CanvasCommands.pageForSpawn(state.canvas) == null) return
         state.note?.contents.orEmpty()
             .filter { state.canvas.document.nodeForContent(it.id) == null }
-            .forEach { spawnWidgetNode(it.type, it.id) }
+            .forEach { spawnWidgetNode(it.type, it.id, housekeeping = true) }
+    }
+
+    private fun observeRemoteCanvasOf(noteId: String) {
+        if (noteId.isEmpty()) return
+        remoteCanvasJob?.cancel()
+        remoteCanvasJob = viewModelScope.launch {
+            observeRemoteCanvas(noteId).collect { nodes ->
+                pendingRemote = nodes
+                touchedWhilePending.clear()
+                adoptPendingRemote()
+            }
+        }
+    }
+
+    private fun adoptPendingRemote() {
+        val nodes = pendingRemote ?: return
+        val state = _state.value
+        if (!state.canvasReady || !CanvasCommands.canAdoptRemote(state.canvas)) return
+        val keep = touchedWhilePending.toSet()
+        pendingRemote = null
+        touchedWhilePending.clear()
+        dispatchCanvas(CanvasCommands.adoptRemote(nodes, keep), housekeeping = true)
+        refreshMissingTexts()
     }
 
     private fun refreshMissingTexts() {
@@ -158,7 +195,7 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         var changed = false
 
         state.canvas.document.nodes
-            .filter { it.kind == ContentType.TEXT }
+            .filter { it.isTextWidget }
             .forEach { node ->
                 val content = node.contentId?.let { byContentId[it] } ?: return@forEach
                 if (content.id in dirtyContentIds) return@forEach
@@ -179,20 +216,45 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
 
     private fun readCanvasOf(note: Note) {
         observeExternalContents(note.id)
+        observeRemoteCanvasOf(note.id)
+        // 🔄 24-Sep-2026 — a widget whose content was deleted elsewhere is dropped before the board is read
+        makeAWish(CANVAS_CODES.PRUNE_ORPHANS, showLoader = false) { pruneCanvasOrphans() }
+    }
+
+    private fun readStoredCanvas() {
+        val noteId = _state.value.note?.id ?: return
         makeAWish(CANVAS_CODES.READ_CANVAS, showLoader = false) {
-            readCanvas(note.id)
+            readCanvas(noteId)
         }
     }
 
+    /** The paper size new pages are cut to — an existing page's, else the fitted screen's. */
+    private fun pageWidth(): Float {
+        val canvas = _state.value.canvas
+        return canvas.document.pages.firstOrNull()?.rect?.width
+            ?: CanvasCommands.fittedPageWidth(canvas)
+    }
+
+    private fun pageHeight(): Float {
+        val canvas = _state.value.canvas
+        return canvas.document.pages.firstOrNull()?.rect?.height
+            ?: CanvasCommands.fittedPageHeight(canvas)
+    }
+
+    /**
+     * 📄 23-Sep-2026 — a page now CARRIES contents instead of standing for one, so what arrives
+     * from storage takes one of three paths: an old canvas is upgraded in place (pages keep their
+     * id, name and rect), an empty one is laid out by [CanvasPaginator] through the reading-mode
+     * grouping, and a current one only has to be guaranteed at least one page.
+     */
     private fun applyCanvas(document: CanvasDocument) {
         val note = _state.value.note ?: return
         val existing = note.contents.filterIsInstance<NoteContentModel.TextContent>()
-        val needsSeed = document.nodes.isEmpty()
+        val isNew = document.nodes.isEmpty()
 
-        // the first page needs a content row of its own, otherwise its node points at nothing
-        // and the page renders as an empty placeholder
+        // an empty note still needs one text row, otherwise its first page has nothing to type into
         val seedContent =
-            if (needsSeed && existing.isEmpty()) {
+            if (isNew && note.contents.isEmpty()) {
                 NoteContentObjectHelper.createText(noteId = note.id, positionedAt = 0.0)
             } else {
                 null
@@ -200,11 +262,19 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         val textContents = existing + listOfNotNull(seedContent)
         val seededNote = seedContent?.let { note.withContents(note.contents + it) } ?: note
 
-        val nodes = document.nodes.ifEmpty {
-            CanvasCommands.stackedTextNodes(textContents.map { it.id }).also { seeded ->
-                makeAWish(CANVAS_CODES.SAVE_NODES, showLoader = false) {
-                    saveCanvasNodes(note.id, seeded)
-                }
+        val width = pageWidth()
+        val height = pageHeight()
+        val rebuilt = when {
+            isNew -> CanvasPaginator.build(seededNote.contents, width, height)
+            CanvasPaginator.needsUpgrade(document.nodes) ->
+                CanvasPaginator.upgrade(document.nodes, width, height)
+
+            else -> CanvasPaginator.ensurePage(document, width, height)
+        }
+        val nodes = rebuilt.nodes
+        if (isNew || nodes != document.nodes) {
+            makeAWish(CANVAS_CODES.SAVE_NODES, showLoader = false) {
+                saveCanvasNodes(note.id, nodes)
             }
         }
         _state.update {
@@ -216,7 +286,8 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         }
         // a note from the "create empty note" path lives only in memory until now; write it so
         // the canvas has a real parent and a later read by id can find it
-        if (needsSeed) {
+        // 🔄 24-Sep-2026 — only then: opening a note that already exists must never re-stamp it
+        if (seedContent != null) {
             makeAWish(NOTES_CODES.UPDATE, showLoader = false) { saveNoteUseCase(seededNote) }
         }
         makeAWish(CANVAS_CODES.READ_VIEWPORT, showLoader = false) {
@@ -228,16 +299,20 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         _state.update {
             it.copy(
                 isLoading = false,
+                canvasReady = true,
                 canvas = CanvasCommands.loaded(it.canvas, it.canvas.document.nodes, viewport)
             )
         }
+        // 🔄 24-Sep-2026 — a canvas that arrived meanwhile lands first; contents still without a widget get one after it
+        adoptPendingRemote()
+        adoptOrphanContents()
     }
 
     private fun textStatesOf(
         nodes: List<CanvasNode>,
         textContents: List<NoteContentModel.TextContent>
     ): Map<String, MasterTextState> = nodes
-        .filter { it.kind == ContentType.TEXT }
+        .filter { it.isTextWidget }
         .mapNotNull { node ->
             val content = textContents.firstOrNull { it.id == node.contentId }
                 ?: return@mapNotNull null
@@ -305,67 +380,57 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         }
     }
 
-    fun onCanvasIntent(intent: CanvasEditorIntent) {
+    fun onCanvasIntent(intent: CanvasEditorIntent) = dispatchCanvas(intent, housekeeping = false)
+
+    // 🔄 24-Sep-2026 — housekeeping (a fit, a measure, a placed orphan, another device's canvas) is written but never stamps the note
+    private fun dispatchCanvas(intent: CanvasEditorIntent, housekeeping: Boolean) {
         val before = _state.value.canvas
         val next = CanvasEditorReducer.reduce(before, intent)
         _state.update { it.copy(canvas = next) }
-        persistCanvasChange(before, next, intent)
+        if (CanvasCommands.gestureStarted(before, next)) gestureStart = next.document
+        val edited = !housekeeping && CanvasCommands.editsLayout(before, next, intent, gestureStart)
+        if (CanvasCommands.gestureEnded(before, next)) gestureStart = null
+        persistCanvasChange(before, next, intent, edited)
+        val waiting = pendingCanvas
+        if (waiting != null && next.viewport.widthPx > 0f) {
+            pendingCanvas = null
+            applyCanvas(waiting)
+        }
+        adoptPendingRemote()
     }
 
+    /**
+     * 📄 23-Sep-2026 — one rule for every intent: whatever the reduce changed is written, what it
+     * removed is deleted, and the note's content order follows the canvas when that changed.
+     * CanvasCommands decides what "changed" means, so iOS writes exactly the same rows.
+     */
     private fun persistCanvasChange(
         before: CanvasEditorState,
         next: CanvasEditorState,
-        intent: CanvasEditorIntent
+        intent: CanvasEditorIntent,
+        edited: Boolean
     ) {
         val id = _state.value.note?.id ?: return
-        when (intent) {
-            // full upsert, not move(): a drop can also have changed the parent page
-            is CanvasEditorIntent.EndDrag ->
-                before.draggingNodeId
-                    ?.let { next.document.nodeById(it) }
-                    ?.let { node -> saveNode(id, node) }
-
-            is CanvasEditorIntent.ReparentNode ->
-                next.document.nodeById(intent.nodeId)?.let { node -> saveNode(id, node) }
-
-            is CanvasEditorIntent.ResizeNode ->
-                next.document.nodeById(intent.nodeId)?.let { node -> resizeNode(node) }
-
-            is CanvasEditorIntent.AddNode -> saveNode(id, intent.node)
-
-            is CanvasEditorIntent.RemoveNode ->
-                makeAWish(CANVAS_CODES.REMOVE_NODE, showLoader = false) {
-                    removeCanvasNode(intent.nodeId)
-                }
-
-            is CanvasEditorIntent.SelectAt,
-            is CanvasEditorIntent.SelectNode -> {
-                CanvasCommands.fittedPageId(next, intent)
-                    ?.let { next.document.nodeById(it) }
-                    ?.takeIf { it.rect != before.document.nodeById(it.id)?.rect }
-                    ?.let { node -> resizeNode(node) }
-                if (before.viewport != next.viewport) saveViewport(id, next.viewport)
+        val changed = CanvasCommands.nodesToSave(before, next)
+        val removed = CanvasCommands.removedNodeIds(before, next)
+        if (pendingRemote != null) touchedWhilePending += changed.map { it.id } + removed
+        if (edited) {
+            // 🔄 the rows land first; only then is the note stamped, so the push that follows carries them
+            makeAWish(CANVAS_CODES.SAVE_EDIT, showLoader = false) { saveCanvasEdit(id, changed, removed) }
+        } else {
+            if (changed.isNotEmpty()) {
+                makeAWish(CANVAS_CODES.SAVE_NODES, showLoader = false) { saveCanvasNodes(id, changed) }
             }
-
-            is CanvasEditorIntent.Pan,
-            is CanvasEditorIntent.Zoom,
-            is CanvasEditorIntent.ZoomTo,
-            CanvasEditorIntent.ZoomIn,
-            CanvasEditorIntent.ZoomOut,
-            CanvasEditorIntent.ZoomToFit,
-            is CanvasEditorIntent.FocusNode -> saveViewport(id, next.viewport)
-
-            else -> Unit
+            removed.forEach { removedId ->
+                makeAWish(CANVAS_CODES.REMOVE_NODE, showLoader = false) { removeCanvasNode(removedId) }
+            }
         }
-    }
-
-    private fun saveNode(noteId: String, node: CanvasNode) {
-        makeAWish(CANVAS_CODES.SAVE_NODE, showLoader = false) { saveCanvasNode(noteId, node) }
-    }
-
-    private fun resizeNode(node: CanvasNode) {
-        makeAWish(CANVAS_CODES.RESIZE_NODE, showLoader = false) {
-            resizeCanvasNode(node.id, node.rect.width, node.rect.height)
+        // 🔄 only a user's edit re-orders the note; housekeeping and another device's canvas never re-stamp it
+        if (edited && CanvasCommands.orderChanged(before, next)) {
+            applyCanvasOrderToNote()
+        }
+        if (before.viewport != next.viewport && CanvasCommands.affectsViewport(intent)) {
+            saveViewport(id, next.viewport)
         }
     }
 
@@ -392,42 +457,66 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         onEditorIntent(EditorIntent.UpdateContent(RichTextCodec.applyTo(content, textState.document)))
     }
 
+    // 📄 24-Sep-2026 — a new page is totally blank: fresh paper beside the last page, fitted to the screen, nothing on it
     fun addPage() {
+        if (_state.value.note == null) return
+        val page = addBarePage(housekeeping = false)
+        onCanvasIntent(CanvasCommands.selectNode(page.id))
+    }
+
+    private fun addBarePage(housekeeping: Boolean): CanvasNode {
+        val page = CanvasCommands.pageNode(_state.value.canvas)
+        dispatchCanvas(CanvasEditorIntent.AddNode(page), housekeeping)
+        return page
+    }
+
+    /** A text block is a widget on the current page now — it no longer costs a whole page. */
+    fun addTextBlock() {
         val note = _state.value.note ?: return
+        val page = CanvasCommands.pageForSpawn(_state.value.canvas) ?: return
         val content = NoteContentObjectHelper.createText(
             noteId = note.id,
             positionedAt = note.contents.size.toDouble()
         )
-        val page = CanvasCommands.pageNode(_state.value.canvas, content.id)
+        val node = CanvasCommands.widgetIn(_state.value.canvas, page, ContentType.TEXT, content.id)
         _state.update {
             it.copy(
-                texts = it.texts + (page.id to MasterTextState.of(RichTextCodec.documentFrom(content)))
+                texts = it.texts + (node.id to MasterTextState.of(RichTextCodec.documentFrom(content)))
             )
         }
-        onCanvasIntent(CanvasEditorIntent.AddNode(page))
-        onCanvasIntent(CanvasCommands.selectNode(page.id))
         onEditorIntent(EditorIntent.AddContent(content))
+        onCanvasIntent(CanvasEditorIntent.AddNode(node))
+        onCanvasIntent(CanvasCommands.setEditing(node.id))
     }
 
     fun addWidget(kind: ContentType, content: NoteContentModel? = null) {
-        if (kind == ContentType.TEXT) {
-            addPage()
+        if (kind == ContentType.TEXT && content == null) {
+            addTextBlock()
             return
         }
         if (_state.value.note == null) return
         if (content != null) onEditorIntent(EditorIntent.AddContent(content))
         spawnWidgetNode(kind, content?.id)
+        if (kind == ContentType.TEXT) refreshMissingTexts()
     }
 
-    private fun spawnWidgetNode(kind: ContentType, contentId: String?) {
-        val page = CanvasCommands.pageForSpawn(_state.value.canvas)
-        if (page == null) {
-            addPage()
-            spawnWidgetNode(kind, contentId)
-            return
-        }
+    /**
+     * 📄 the platform reports what a measured widget's content actually is; a text widget that
+     * grew pushes whatever is under it down, and the page scrolls further — never spills.
+     */
+    fun onWidgetMeasured(nodeId: String, height: Float) {
+        val node = _state.value.canvas.document.nodeById(nodeId) ?: return
+        if (!node.isWidget || height <= 0f) return
+        if (kotlin.math.abs(node.rect.height - height) < MEASURE_EPSILON) return
+        dispatchCanvas(CanvasCommands.widgetMeasured(nodeId, height), housekeeping = true)
+    }
+
+    // 📄 24-Sep-2026 — a new widget lands on the page the user is on, and that page scrolls to show it
+    private fun spawnWidgetNode(kind: ContentType, contentId: String?, housekeeping: Boolean = false) {
+        val page = CanvasCommands.pageForSpawn(_state.value.canvas) ?: addBarePage(housekeeping)
         val node = CanvasCommands.widgetIn(_state.value.canvas, page, kind, contentId)
-        onCanvasIntent(CanvasEditorIntent.AddNode(node))
+        dispatchCanvas(CanvasEditorIntent.AddNode(node), housekeeping)
+        if (!housekeeping) dispatchCanvas(CanvasCommands.revealEnd(page.id), housekeeping = true)
     }
 
     fun deleteContent(contentId: String) {
@@ -498,12 +587,13 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
 
     fun linkedNodes(nodeId: String) = CanvasCommands.linkedNodes(_state.value.canvas, nodeId)
 
+    // 🔄 24-Sep-2026 — the content goes first, so the re-order the removal triggers can never save it back
     fun deleteNode(nodeId: String) {
-        val note = _state.value.note ?: return
+        if (_state.value.note == null) return
         val contentId = _state.value.canvas.document.nodeById(nodeId)?.contentId
+        if (contentId != null) onEditorIntent(EditorIntent.RemoveContent(contentId))
         onCanvasIntent(CanvasCommands.removeNode(nodeId))
         _state.update { it.copy(texts = it.texts - nodeId) }
-        if (contentId != null) onEditorIntent(EditorIntent.RemoveContent(contentId))
     }
 
     fun renameNode(nodeId: String, name: String) {
@@ -513,15 +603,13 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         }
     }
 
+    // 🔄 24-Sep-2026 — the rebuilt board replaces the old one in a single edit: new rows written, old ones deleted, then the note travels
     fun rebuildLayoutFromNote() {
         val note = _state.value.note ?: return
-        val document = NoteCanvasConverter.toCanvas(note.contents)
+        val document = CanvasPaginator.build(note.contents, pageWidth(), pageHeight())
         onCanvasIntent(CanvasCommands.replaceDocument(document))
         val textContents = note.contents.filterIsInstance<NoteContentModel.TextContent>()
         _state.update { it.copy(texts = textStatesOf(document.nodes, textContents)) }
-        // the rewrite has to land after the wipe, so it is chained off CLEAR_CANVAS
-        pendingLayoutNodes = document.nodes
-        makeAWish(CANVAS_CODES.CLEAR_CANVAS, showLoader = false) { clearCanvas(note.id) }
     }
 
     fun applyCanvasOrderToNote() {
@@ -602,10 +690,15 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         onEditorIntent(EditorIntent.ShowAttachSheet(visible))
     }
 
+    // 🔄 24-Sep-2026 — every result is handled on the main thread, where the canvas and the dirty ids are changed
     override fun onSuccess(
         taskCode: TaskCode,
         result: Result.Success<BaseResponse<*>>
     ) {
+        viewModelScope.launch(Dispatchers.Main) { handleSuccess(taskCode, result) }
+    }
+
+    private fun handleSuccess(taskCode: TaskCode, result: Result.Success<BaseResponse<*>>) {
         when (taskCode) {
             NOTES_CODES.READ -> {
                 val note = result.data.data as? Note ?: return
@@ -624,20 +717,19 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
                 runPendingOpen()
             }
 
-            CANVAS_CODES.READ_CANVAS ->
-                applyCanvas(result.data.data as? CanvasDocument ?: CanvasDocument())
+            // 📄 pages are cut to the fitted screen, so a canvas waits for the board to be measured
+            CANVAS_CODES.READ_CANVAS -> {
+                val document = result.data.data as? CanvasDocument ?: CanvasDocument()
+                if (_state.value.canvas.viewport.widthPx > 0f) applyCanvas(document)
+                else pendingCanvas = document
+            }
 
             CANVAS_CODES.READ_VIEWPORT -> applyViewport(result.data.data as? Viewport)
 
-            CANVAS_CODES.CLEAR_CANVAS -> {
-                val note = _state.value.note ?: return
-                val nodes = pendingLayoutNodes
-                pendingLayoutNodes = emptyList()
-                if (nodes.isEmpty()) return
-                makeAWish(CANVAS_CODES.SAVE_NODES, showLoader = false) {
-                    saveCanvasNodes(note.id, nodes)
-                }
-            }
+            CANVAS_CODES.PRUNE_ORPHANS -> readStoredCanvas()
+
+            // 🔄 24-Sep-2026 — a user's layout edit is on disk: stamp the note so it travels, exactly like a content edit
+            CANVAS_CODES.SAVE_EDIT -> onEditorIntent(EditorIntent.SaveRequested)
 
             else -> _state.update { it.copy(isLoading = false) }
         }
@@ -652,9 +744,21 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     }
 
     override fun onFailure(taskCode: TaskCode, error: Error) {
+        viewModelScope.launch(Dispatchers.Main) { handleFailure(taskCode, error) }
+    }
+
+    private fun handleFailure(taskCode: TaskCode, error: Error) {
         super.onFailure(taskCode, error)
         _state.update { it.copy(isLoading = false, error = error.displayMessage()) }
+        // no saved viewport is not a reason to leave the canvas unready
+        if (taskCode == CANVAS_CODES.READ_VIEWPORT) applyViewport(null)
+        if (taskCode == CANVAS_CODES.PRUNE_ORPHANS) readStoredCanvas()
         runPendingOpen()
+    }
+
+    companion object {
+        /** Sub-pixel measurement noise must not start a resize/measure ping-pong. */
+        private const val MEASURE_EPSILON = 1.5f
     }
 
     // 🎧 the player's list belongs to the screen that is open, exactly as in the note editor

@@ -66,6 +66,16 @@ class SaveCanvasViewportUseCase : CanvasBaseUseCase() {
         getBaseApiCall { canvasRepository.saveViewport(noteId, viewport) }
 }
 
+class SaveCanvasEditUseCase : CanvasBaseUseCase() {
+     operator fun invoke(noteId: String, nodes: List<CanvasNode>, removedIds: List<String>) =
+        getBaseApiCall { canvasRepository.saveEdit(noteId, nodes, removedIds) }
+}
+
+class UpgradeCanvasLayoutsUseCase : CanvasBaseUseCase() {
+     operator fun invoke(unitScale: Float, maxPaperWidth: Float) =
+        getBaseApiCall { canvasRepository.upgradeLayouts(unitScale, maxPaperWidth) }
+}
+
 class PruneCanvasOrphansUseCase : CanvasBaseUseCase() {
      operator fun invoke() =
         getBaseApiCall { canvasRepository.pruneOrphans() }

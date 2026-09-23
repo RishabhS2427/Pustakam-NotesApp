@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -54,7 +55,9 @@ import com.app.pustakam.core.common.util.ContentType
 @OptIn(UnstableApi::class)
 @Composable
 fun  AudioPlayerUIState(
-    noteContentModel: NoteContentModel.MediaContent, onDelete: (NoteContentModel) -> Unit = {}, onSave: () -> Unit = {}
+    noteContentModel: NoteContentModel.MediaContent, onDelete: (NoteContentModel) -> Unit = {}, onSave: () -> Unit = {},
+    // 🧱 24-Sep-2026 — the master canvas spaces its cards itself
+    cardPadding: Dp = 8.dp
 ) {
     val noteContent = remember { noteContentModel }
     val viewModel: PlayMediaViewModel = viewModel()
@@ -75,6 +78,7 @@ fun  AudioPlayerUIState(
             onSave = onSave,
             // 📥 21-Sep-2026 — the LIVE block, not the remembered copy: that never learns the asset id arriving later
             media = noteContentModel,
+            cardPadding = cardPadding,
         )
     }
 }
@@ -85,11 +89,12 @@ fun AudioPlayView(
     state: PlayerUiState, onDelete: () -> Unit = {}, onPlay: () -> Unit = {}, onSeek: (Float) -> Unit = {},
     onSave : () -> Unit = {},
     media: NoteContentModel.MediaContent = state.noteContent,
+    cardPadding: Dp = 8.dp,
 ) {
 
     val iconModifier = Modifier.size(28.dp)
     val interactionSource = remember { MutableInteractionSource() }
-    Card(modifier = Modifier.padding(8.dp),
+    Card(modifier = Modifier.padding(cardPadding),
         elevation = CardDefaults.cardElevation(
             defaultElevation = 12.dp
         )

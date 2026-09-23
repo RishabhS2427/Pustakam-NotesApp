@@ -25,6 +25,11 @@ internal class NoteSyncRepository : INoteSyncRepository, KoinComponent {
         extraBufferCapacity = 64
     )
 
+    private val remoteCanvas = MutableSharedFlow<NodesEvent>(
+        replay = 0,
+        extraBufferCapacity = 64
+    )
+
     override fun observeContents(noteId: String): Flow<List<NoteContentModel>> =
         contents.filter { it.noteId == noteId }.map { it.contents }
 
@@ -39,5 +44,13 @@ internal class NoteSyncRepository : INoteSyncRepository, KoinComponent {
     override fun publishCanvasNodes(noteId: String, nodes: List<CanvasNode>) {
         if (noteId.isEmpty()) return
         this.nodes.tryEmit(NodesEvent(noteId, nodes))
+    }
+
+    override fun observeRemoteCanvas(noteId: String): Flow<List<CanvasNode>> =
+        remoteCanvas.filter { it.noteId == noteId }.map { it.nodes }
+
+    override fun publishRemoteCanvas(noteId: String, nodes: List<CanvasNode>) {
+        if (noteId.isEmpty() || nodes.isEmpty()) return
+        remoteCanvas.tryEmit(NodesEvent(noteId, nodes))
     }
 }

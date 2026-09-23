@@ -34,6 +34,9 @@ class NotesDao : KoinComponent {
 
     private val queries = database.notesDatabaseQueries
 
+    // 🔄 24-Sep-2026 — the master editor's layout travels inside its note
+    private val canvasDao by lazy { CanvasDao(database) }
+
     fun createTagOnDB(tag : Tag) : Tag?   {
        println("Create Tab On DB called with tag: $tag") // Debug log
         database.transaction {
@@ -434,6 +437,7 @@ class NotesDao : KoinComponent {
     fun selectDirtyNotes(limit: Int): List<Note> =
         queries.selectDirtyNoteIds(userId, limit.toLong()).executeAsList()
             .mapNotNull { selectNoteByIdIncludingDeleted(it) }
+            .map { note -> if (note.deleted) note else note.copy(canvas = canvasDao.wireNodes(note.id).ifEmpty { null }) }
 
     fun countDirtyNotes(): Long = queries.countDirtyNotes(userId).executeAsOne()
 
@@ -481,6 +485,9 @@ class NotesDao : KoinComponent {
                 serverUpdatedAt = note.serverUpdatedAt,
             )
             if (!note.deleted) note.contents.forEach { insertOrUpdateNotesContent(it) }
+            // 🔄 24-Sep-2026 — a pulled layout replaces this device's; a copy that carries none leaves it alone
+            if (note.deleted) queries.deleteCanvasNodesForNote(note.id)
+            else note.canvas?.takeIf { it.isNotEmpty() }?.let { canvasDao.replaceFromWire(note.id, it) }
         }
     }
 

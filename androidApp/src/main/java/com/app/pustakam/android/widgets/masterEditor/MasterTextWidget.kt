@@ -82,6 +82,10 @@ fun MasterTextWidget(
     onIntent: (MasterTextIntent) -> Unit,
     keyboardInsetPx: Float = 0f,
     shouldFocus: Boolean = false,
+    // 📄 a canvas page makes the keyboard room on its own content and only the field being
+    //   edited may scroll it — with several fields on one page, each doing both fought
+    reserveKeyboardRoom: Boolean = true,
+    revealCaret: Boolean = true,
     onFocusChanged: (Boolean) -> Unit = {}
 ) {
     val colors = SmartTextTokens.colors
@@ -117,7 +121,7 @@ fun MasterTextWidget(
 
     // room to scroll the end of the text clear of the keyboard, and the caret clear of that
     val trailingRoom = with(density) {
-        if (keyboardInsetPx <= 0f) 0.dp
+        if (!reserveKeyboardRoom || keyboardInsetPx <= 0f) 0.dp
         else (keyboardInsetPx + CanvasCommands.caretRevealPadding(baseSize.toPx() * LINE_HEIGHT)).toDp()
     }
 
@@ -125,7 +129,8 @@ fun MasterTextWidget(
         if (shouldFocus) runCatching { focusRequester.requestFocus() }
     }
 
-    LaunchedEffect(caretRect, keyboardInsetPx) {
+    LaunchedEffect(caretRect, keyboardInsetPx, revealCaret) {
+        if (!revealCaret) return@LaunchedEffect
         val caret = caretRect ?: return@LaunchedEffect
         val clearance = CanvasCommands.caretRevealPadding(caret.height) + keyboardInsetPx
         caretRevealer.bringIntoView(

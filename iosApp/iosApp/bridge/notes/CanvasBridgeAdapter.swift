@@ -102,4 +102,41 @@ final class CanvasBridgeAdapter {
             noteId: noteId, viewport: viewport, onSuccess: { _ in }, onError: onError
         ))
     }
+
+    // MARK: - Sync
+
+    // 🔄 24-Sep-2026 — a user's layout edit; onSaved runs once its rows are on disk, which is when the note may be stamped
+    func saveEdit(
+        noteId: String,
+        nodes: [CanvasNode],
+        removedIds: [String],
+        onSaved: @escaping () -> Void,
+        onError: @escaping (BridgeError) -> Void = { _ in }
+    ) {
+        closeables.append(bridge.saveEdit(
+            noteId: noteId, nodes: nodes, removedIds: removedIds, onSuccess: { _ in onSaved() }, onError: onError
+        ))
+    }
+
+    // 🔄 24-Sep-2026 — onDone runs either way: a failed prune must never keep the board from being read
+    func pruneOrphans(onDone: @escaping () -> Void) {
+        closeables.append(bridge.pruneOrphans(
+            onSuccess: { _ in onDone() }, onError: { _ in onDone() }
+        ))
+    }
+
+    // 🔄 24-Sep-2026 — another device's canvas for this note, delivered on the main thread
+    func observeRemoteCanvas(noteId: String, onChange: @escaping ([CanvasNode]) -> Void) -> Closeable {
+        bridge.observeRemoteCanvas(noteId: noteId, onChange: onChange)
+    }
+
+    // 📐 24-Sep-2026 — the one-time move of every stored canvas to the compact layout
+    func upgradeLayouts(unitScale: Float, maxPaperWidth: Float, onDone: @escaping (Bool) -> Void) {
+        closeables.append(bridge.upgradeLayouts(
+            unitScale: unitScale,
+            maxPaperWidth: maxPaperWidth,
+            onSuccess: { _ in onDone(true) },
+            onError: { _ in onDone(false) }
+        ))
+    }
 }

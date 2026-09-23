@@ -2,7 +2,9 @@ package com.app.pustakam.feature.notes.data.sync
 
 import com.app.pustakam.core.common.util.ContentType
 import com.app.pustakam.core.model.models.response.notes.Note
+import com.app.pustakam.core.model.models.response.notes.NoteCanvasNode
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -117,5 +119,55 @@ class NoteWireMapperTest {
             "a local edit that has not reached the server yet must not be overwritten by a pull"
         )
         assertFalse(NoteWireMapper.canApplyOverLocal(note(syncStatus = "PENDING_DELETE"), SYNCED))
+    }
+
+    // ---- 24-Sep-2026: the master editor's layout travels inside its note ----
+
+    private val wireJson = Json {
+        explicitNulls = false
+        ignoreUnknownKeys = true
+        isLenient = true
+        classDiscriminator = "type"
+        coerceInputValues = true
+    }
+
+    private fun canvasNode(id: String, role: String, parentId: String? = null) = NoteCanvasNode(
+        id = id, kind = "IMAGE", role = role, parentId = parentId,
+        x = 8f, y = 8f, width = 240f, height = 160f, slotOrder = 1.5, pageOrder = 0.0,
+    )
+
+    @Test
+    fun toWire_keepsTheCanvasSoTheLayoutTravels() {
+        val canvas = listOf(canvasNode("p1", "PAGE"), canvasNode("w1", "WIDGET", "p1"))
+        assertEquals(canvas, NoteWireMapper.toWire(note().copy(canvas = canvas)).canvas)
+    }
+
+    @Test
+    fun aNoteWithoutACanvasSendsNoCanvasKey() {
+        val json = wireJson.encodeToString(Note.serializer(), NoteWireMapper.toWire(note()))
+        assertFalse("\"canvas\"" in json, "absent means this copy carries no layout, so the server keeps its own")
+    }
+
+    @Test
+    fun theCanvasSurvivesTheWireBothWays() {
+        val canvas = listOf(canvasNode("p1", "PAGE"), canvasNode("w1", "WIDGET", "p1"))
+        val json = wireJson.encodeToString(Note.serializer(), NoteWireMapper.toWire(note().copy(canvas = canvas)))
+        assertEquals(canvas, wireJson.decodeFromString(Note.serializer(), json).canvas)
+    }
+
+    @Test
+    fun aServerCanvasNodeWithFieldsThisBuildDoesNotKnowStillReads() {
+        val json = """{"_id":"note-1","title":"t","updatedAt":"100","createdAt":"1","contents":[],
+            "canvas":[{"id":"p1","kind":"TEXT","role":"PAGE","x":0,"y":0,"width":360,"height":640,"extra":true}]}"""
+        val canvas = wireJson.decodeFromString(Note.serializer(), json).canvas
+        assertEquals("p1", canvas?.single()?.id)
+        assertEquals(360f, canvas?.single()?.width)
+    }
+
+    @Test
+    fun mergeLocalMedia_keepsThePulledCanvas() {
+        val canvas = listOf(canvasNode("p1", "PAGE"))
+        val merged = NoteWireMapper.mergeLocalMedia(note().copy(canvas = canvas), note(contents = listOf(media())))
+        assertEquals(canvas, merged.canvas)
     }
 }

@@ -52,4 +52,14 @@ interface ICanvasRepository {
         noteId: String,
         viewport: Viewport
     ): Result<BaseResponse<Viewport>, Error>
+
+    // 🔄 24-Sep-2026 — a user's layout edit: written and deleted in one go, before the note is stamped to travel
+    suspend fun saveEdit(
+        noteId: String,
+        nodes: List<CanvasNode>,
+        removedIds: List<String>
+    ): Result<BaseResponse<Boolean>, Error>
+
+    // 📐 24-Sep-2026 — every stored canvas moved to dp/pt and the compact layout, once per device
+    suspend fun upgradeLayouts(unitScale: Float, maxPaperWidth: Float): Result<BaseResponse<Int>, Error>
 }

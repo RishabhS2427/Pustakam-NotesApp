@@ -90,31 +90,35 @@ struct MasterEditorScreen: View {
         MasterCanvas(
             state: viewModel.canvas,
             onIntent: viewModel.onCanvasIntent,
-            onRename: { nodeId, name in viewModel.renameNode(nodeId: nodeId, name: name) }
+            onRename: { nodeId, name in viewModel.renameNode(nodeId: nodeId, name: name) },
+            onMeasured: { nodeId, height in
+                viewModel.onWidgetMeasured(nodeId: nodeId, height: height)
+            },
+            keyboardInset: keyboardHeight
         ) { node, isEditing in
             nodeBody(node: node, isEditing: isEditing)
         }
         // without this SwiftUI lifts the whole canvas when the keyboard opens, which moves
         // the page off the screen it was fitted to
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .onAppear { autoFocusLastText() }
-        .onChange(of: autoFocusKey) { _, _ in autoFocusLastText() }
+        .onAppear { autoFocusLastPage() }
+        .onChange(of: autoFocusKey) { _, _ in autoFocusLastPage() }
     }
 
     private var autoFocusKey: String {
-        let target = commands.lastTextNodeId(state: viewModel.canvas) ?? ""
+        let target = commands.lastPageId(state: viewModel.canvas) ?? ""
         return "\(target)@\(Int(viewModel.canvas.viewport.widthPx))"
     }
 
-    /// Opening a canvas lands the caret in its last text field, once there is a viewport to
-    /// fit the page to. Selecting the page is what puts it into edit mode.
-    private func autoFocusLastText() {
+    /// 📄 A note opens on its LAST page, fitted to the screen and scrolled to its end — the same
+    /// as tapping that page. The keyboard stays down until a text widget is tapped.
+    private func autoFocusLastPage() {
         guard !autoFocused,
               viewModel.canvas.viewport.widthPx > 0,
               viewModel.canvas.editingNodeId == nil,
-              let target = commands.lastTextNodeId(state: viewModel.canvas) else { return }
+              let target = commands.lastPageId(state: viewModel.canvas) else { return }
         autoFocused = true
-        viewModel.onCanvasIntent(commands.selectNode(nodeId: target))
+        viewModel.onCanvasIntent(commands.focusPage(pageId: target))
     }
 
     private func nodeBody(node: CanvasNode, isEditing: Bool) -> MasterNodeContent {
@@ -177,7 +181,7 @@ struct MasterEditorScreen: View {
     @ViewBuilder
     private var attachActions: some View {
         Button("New page") { viewModel.addPage() }
-        Button("Text") { viewModel.addWidget(kind: ContentType.text)}
+        Button("Text block") { viewModel.addWidget(kind: ContentType.text) }
         Button("Photo or video") { viewModel.requestCapture(ContentType.image) }
         Button("Record audio") { viewModel.requestCapture(ContentType.audio) }
         Button("Location") { viewModel.requestCapture(ContentType.location) }
@@ -292,19 +296,24 @@ struct MasterNodeContent: View {
 
     @ViewBuilder
     var body: some View {
-        if content is NoteContentModel.TextContent {
+        // 📄 paper owns no content of its own — the widgets dropped on it draw themselves
+        if node.isPage {
+            Color.clear
+        } else if content is NoteContentModel.TextContent {
             textBody
         } else if let media {
             switch media.type {
             case ContentType.image, ContentType.gif, ContentType.video, ContentType.audio:
                 mediaBody
 
-            case ContentType.docx, ContentType.epub, ContentType.md,
+            case ContentType.docx, ContentType.epub, ContentType.md, ContentType.txt,
                  ContentType.pdf, ContentType.other:
+                // 🧱 24-Sep-2026 — the compact card the canvas gave it, and no margin of its own
                 InlineBookFileView(
                     media: media,
                     onOpenFull: onOpenMedia,
-                    onDelete: onDelete
+                    onDelete: onDelete,
+                    cardHeight: cardSize.height
                 )
 
             default:
@@ -314,9 +323,17 @@ struct MasterNodeContent: View {
             linkBody
         } else if content is NoteContentModel.Location {
             locationBody
+        } else if node.contentId != nil {
+            // 🔄 24-Sep-2026 — a widget waiting for its content (it may still be on its way from the other device) draws nothing
+            Color.clear
         } else {
             placeholder(node.kind.name)
         }
+    }
+
+    // 🧱 24-Sep-2026 — a card is laid out at its own canvas size; the canvas zooms it like a picture
+    private var cardSize: CGSize {
+        CGSize(width: CGFloat(node.rect.width), height: CGFloat(node.rect.height))
     }
 
     @ViewBuilder
@@ -334,11 +351,12 @@ struct MasterNodeContent: View {
                 shouldFocus: isEditing,
                 scrollable: false,
                 minLines: 5,
-                keyboardInsetPx: keyboardInsetPx,
+                keyboardInsetPx: isEditing ? keyboardInsetPx : 0,
+                reserveKeyboardRoom: false,
                 onFocused: onFocused,
                 onIntent: onTextIntent
             )
-            .padding(16)
+            // 🧱 24-Sep-2026 — no margin of its own: the page's 8pt spacing is the only space around a widget
             .frame(maxHeight: .infinity, alignment: .top)
         } else {
             placeholder("Empty text")
@@ -353,12 +371,17 @@ struct MasterNodeContent: View {
                 CardImageEditor(
                     content: media,
                     actionClick: onOpenMedia,
-                    actionDelete: onDelete
+                    actionDelete: onDelete,
+                    cardWidth: cardSize.width,
+                    cardHeight: cardSize.height
                 )
 
             case ContentType.video:
                 VideoCardPlayer(
                     content: media,
+                    cardWidth: cardSize.width,
+                    cardHeight: cardSize.height,
+                    cardPadding: 0,
                     actionClick: onOpenMedia,
                     actionDelete: onDelete
                 )

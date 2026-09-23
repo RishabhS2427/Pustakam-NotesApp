@@ -16,6 +16,9 @@ struct MasterTextWidget: UIViewRepresentable {
     var minLines: Int = 1
     var placeholder: String = "Keep your thoughts alive."
     var keyboardInsetPx: CGFloat = 0
+    // 📄 a canvas page makes the keyboard room on its own content; with several text views on
+    //   one page, each padding itself by the keyboard pushed everything under it down
+    var reserveKeyboardRoom: Bool = true
     var onFocused: () -> Void = {}
     let onIntent: (MasterTextIntent) -> Void
 
@@ -77,7 +80,7 @@ struct MasterTextWidget: UIViewRepresentable {
         uiView.isScrollEnabled = scrollable
         uiView.configure(palette: palette, baseSize: baseSize)
         // room to scroll the end of the text clear of the keyboard, and the caret clear of that
-        uiView.textContainerInset.bottom = keyboardInsetPx <= 0 ? 0 : keyboardInsetPx + CGFloat(
+        uiView.textContainerInset.bottom = !reserveKeyboardRoom || keyboardInsetPx <= 0 ? 0 : keyboardInsetPx + CGFloat(
             CanvasCommands.shared.caretRevealPadding(
                 lineHeightPx: Float(baseSize * MasterTextWidget.lineHeight)
             )

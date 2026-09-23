@@ -1,126 +1,60 @@
 package com.app.pustakam.core.richtext.master.presentation
 
-import com.app.pustakam.core.common.util.ContentType
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 import com.app.pustakam.core.richtext.master.model.CanvasDocument
 import com.app.pustakam.core.richtext.master.model.CanvasNode
+import com.app.pustakam.core.richtext.master.model.CanvasRole
+
+/**
+ * 📄 23-Sep-2026 — the bridge between a note's LINEAR content list and the canvas.
+ *
+ * A canvas page is now paper that carries many contents, so the ordering lives in
+ * [CanvasNode.slotOrder] (fractional, like [NoteContentModel.position]) rather than in the link
+ * chains this object used to walk. Which page a content lands on is decided by
+ * `CanvasPaginator` in :core:filesys, which reuses the reading-mode layout engine; this object
+ * only converts between orders.
+ */
 object NoteCanvasConverter {
 
     const val COLUMN_GAP = 48f
     const val ROW_GAP = 32f
     const val MEDIA_PER_ROW = 3
 
-
-
-    private fun isSequentialMedia(content: NoteContentModel): Boolean =
-        content.type == ContentType.IMAGE ||
-            content.type == ContentType.GIF ||
-            content.type == ContentType.VIDEO
-
     /**
-     * Note order becomes canvas layout: text and documents get their own full-width row, and
-     * consecutive images/videos are grouped into a strip the way the book reader pages them.
+     * A flat fallback layout: one page with every content stacked down it. Real page splitting
+     * goes through `CanvasPaginator.rebuild`, which measures blocks the way the reader does.
      */
     fun toCanvas(contents: List<NoteContentModel>): CanvasDocument {
         val ordered = contents.sortedBy { it.position }
-        val nodes = mutableListOf<CanvasNode>()
-        var y = 0f
-        var index = 0
-        var z = 0
-        var previousId: String? = null
-
-        while (index < ordered.size) {
-            val content = ordered[index]
-            if (isSequentialMedia(content)) {
-                val run = mutableListOf<NoteContentModel>()
-                while (index < ordered.size && isSequentialMedia(ordered[index])) {
-                    run.add(ordered[index])
-                    index++
-                }
-                var x = 0f
-                var rowHeight = 0f
-                run.forEachIndexed { position, media ->
-                    if (position > 0 && position % MEDIA_PER_ROW == 0) {
-                        x = 0f
-                        y += CanvasNode.DEFAULT_MEDIA_HEIGHT + ROW_GAP
-                    }
-                    val node = CanvasNode.of(
-                        kind = media.type,
-                        contentId = media.id,
-                        x = x,
-                        y = y,
-                        width = CanvasNode.DEFAULT_MEDIA_WIDTH,
-                        height = CanvasNode.DEFAULT_MEDIA_HEIGHT,
-                        name = CanvasNode.defaultName( content.type, nodes.size)
-                    ).copy(z = z++)
-                    nodes.add(linkFrom(previousId, node, nodes))
-                    previousId = node.id
-                    x += CanvasNode.DEFAULT_MEDIA_WIDTH + COLUMN_GAP
-                    rowHeight = CanvasNode.DEFAULT_MEDIA_HEIGHT
-                }
-                y += rowHeight + ROW_GAP
-                continue
-            }
-
-            val isText = content.type == ContentType.TEXT
-            val height = if (isText) CanvasNode.DEFAULT_TEXT_HEIGHT else CanvasNode.DEFAULT_MEDIA_HEIGHT
+        val page = CanvasNode.page(order = 0.0, x = 0f, y = 0f)
+        var y = PAGE_PADDING
+        val widgets = ordered.mapIndexed { index, content ->
+            val width = CanvasNode.widgetWidthFor(content.type, page.rect.width)
+            val height = CanvasNode.widgetHeightFor(content.type, width)
             val node = CanvasNode.of(
-                kind =  content.type,
+                kind = content.type,
                 contentId = content.id,
-                x = 0f,
+                x = PAGE_PADDING,
                 y = y,
-                width = if (isText) CanvasNode.DEFAULT_TEXT_WIDTH else CanvasNode.DEFAULT_MEDIA_WIDTH,
+                width = width,
                 height = height,
-                name = CanvasNode.defaultName( content.type, nodes.size)
-            ).copy(z = z++)
-            nodes.add(linkFrom(previousId, node, nodes))
-            previousId = node.id
-            y += height + ROW_GAP
-            index++
+                parentId = page.id,
+                name = CanvasNode.defaultName(content.type, index)
+            ).copy(z = index + 1, role = CanvasRole.WIDGET, slotOrder = index.toDouble())
+            y += height + CanvasNode.WIDGET_GAP
+            node
         }
-        return CanvasDocument(nodes)
+        return CanvasDocument(listOf(page) + widgets)
     }
 
-    private fun linkFrom(
-        previousId: String?,
-        node: CanvasNode,
-        nodes: MutableList<CanvasNode>
-    ): CanvasNode {
-        if (previousId == null) return node
-        val previousIndex = nodes.indexOfFirst { it.id == previousId }
-        if (previousIndex >= 0) {
-            nodes[previousIndex] = nodes[previousIndex].linkedTo(node.id)
-        }
-        return node.copy(parentId = previousId)
-    }
+    /** Canvas back to a linear note: slot order IS the reading order. */
+    fun toOrderedContentIds(document: CanvasDocument): List<String> =
+        document.orderedWidgets.mapNotNull { it.contentId }
 
     /**
-     * Canvas back to a linear note. Link chains define the sequence; anything not in a chain
-     * falls back to reading order — top to bottom, then left to right.
+     * Re-stamps [NoteContentModel.position] from the canvas order, so the book reader, the note
+     * editor and the server all page through the note in the order the canvas shows.
      */
-    fun toOrderedContentIds(document: CanvasDocument): List<String> {
-        val nodes = document.nodes.filter { it.contentId != null }
-        if (nodes.isEmpty()) return emptyList()
-
-        val byId = nodes.associateBy { it.id }
-        val linked = nodes.flatMap { it.links }.toSet()
-        val heads = nodes.filter { it.id !in linked }.sortedWith(readingOrder)
-
-        val visited = mutableSetOf<String>()
-        val ordered = mutableListOf<CanvasNode>()
-
-        fun walk(node: CanvasNode) {
-            if (!visited.add(node.id)) return
-            ordered.add(node)
-            node.links.mapNotNull { byId[it] }.sortedWith(readingOrder).forEach { walk(it) }
-        }
-
-        heads.forEach { walk(it) }
-        nodes.sortedWith(readingOrder).forEach { walk(it) }
-
-        return ordered.mapNotNull { it.contentId }
-    }
-
     fun reorderContents(
         contents: List<NoteContentModel>,
         document: CanvasDocument
@@ -140,5 +74,5 @@ object NoteCanvasConverter {
         is NoteContentModel.Location -> copy(position = newPosition)
     }
 
-    private val readingOrder = compareBy<CanvasNode>({ it.rect.y }, { it.rect.x })
+    private const val PAGE_PADDING = CanvasNode.PAGE_PADDING
 }

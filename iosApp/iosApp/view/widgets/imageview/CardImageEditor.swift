@@ -8,6 +8,9 @@ struct CardImageEditor: View {
     var actionDelete: () -> Void = {}
     // 🔧 14-Jul-2026: NEW — save-to-device callback (image → Photos gallery). Default keeps old call sites compiling.
     var actionSave: () -> Void = {}
+    // 🧱 24-Sep-2026 — the master canvas gives the card its own size; the defaults keep every other screen's 200x300 card
+    var cardWidth: CGFloat = 200
+    var cardHeight: CGFloat = 400
     @State private var showActions: Bool = false
     // 🔧 02-Aug-2026: cancels a pending auto-hide when the button is tapped again (Android hideJob parity)
     @State private var hideToken: Int = 0
@@ -39,7 +42,7 @@ struct CardImageEditor: View {
                     ProgressView()
                 }
             }
-            .frame(width: 200, height: 300)
+            .frame(width: cardWidth, height: cardHeight)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .contentShape(Rectangle())
             .onTapGesture {
@@ -105,7 +108,7 @@ struct CardImageEditor: View {
                 .transition(.opacity)
             }
         }
-        .frame(width: 200, height: 300)
+        .frame(width: cardWidth, height: cardHeight)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }

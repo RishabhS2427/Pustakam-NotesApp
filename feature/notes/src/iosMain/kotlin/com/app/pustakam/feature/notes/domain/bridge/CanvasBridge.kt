@@ -3,19 +3,24 @@ package com.app.pustakam.feature.notes.domain.bridge
 import com.app.pustakam.core.common.bridge.BridgeError
 import com.app.pustakam.core.common.bridge.Closeable
 import com.app.pustakam.core.data.bridge.subscribeTo
+import com.app.pustakam.core.data.bridge.watch
 import com.app.pustakam.core.richtext.master.model.CanvasDocument
 import com.app.pustakam.core.richtext.master.model.CanvasNode
 import com.app.pustakam.core.richtext.master.model.Viewport
 import com.app.pustakam.feature.notes.domain.usecase.ClearCanvasUseCase
 import com.app.pustakam.feature.notes.domain.usecase.MoveCanvasNodeUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ObserveRemoteCanvasUseCase
+import com.app.pustakam.feature.notes.domain.usecase.PruneCanvasOrphansUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ReadCanvasUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ReadCanvasViewportUseCase
 import com.app.pustakam.feature.notes.domain.usecase.RemoveCanvasNodeUseCase
 import com.app.pustakam.feature.notes.domain.usecase.RenameCanvasNodeUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ResizeCanvasNodeUseCase
+import com.app.pustakam.feature.notes.domain.usecase.SaveCanvasEditUseCase
 import com.app.pustakam.feature.notes.domain.usecase.SaveCanvasNodeUseCase
 import com.app.pustakam.feature.notes.domain.usecase.SaveCanvasNodesUseCase
 import com.app.pustakam.feature.notes.domain.usecase.SaveCanvasViewportUseCase
+import com.app.pustakam.feature.notes.domain.usecase.UpgradeCanvasLayoutsUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,6 +51,10 @@ class CanvasBridge : KoinComponent {
     private val removeCanvasNodeUseCase: RemoveCanvasNodeUseCase by inject()
     private val clearCanvasUseCase: ClearCanvasUseCase by inject()
     private val saveCanvasViewportUseCase: SaveCanvasViewportUseCase by inject()
+    private val saveCanvasEditUseCase: SaveCanvasEditUseCase by inject()
+    private val upgradeCanvasLayoutsUseCase: UpgradeCanvasLayoutsUseCase by inject()
+    private val observeRemoteCanvasUseCase: ObserveRemoteCanvasUseCase by inject()
+    private val pruneCanvasOrphansUseCase: PruneCanvasOrphansUseCase by inject()
 
     /* ============================ CANVAS — reads ============================ */
 
@@ -138,6 +147,39 @@ class CanvasBridge : KoinComponent {
     ): Closeable = subscribeTo(
         writeScope, { saveCanvasViewportUseCase(noteId, viewport) }, {}, onSuccess, onError
     )
+
+    // 🔄 24-Sep-2026 — a user's layout edit, written in one go; onSuccess is where the note gets stamped to travel
+    fun saveEdit(
+        noteId: String,
+        nodes: List<CanvasNode>,
+        removedIds: List<String>,
+        onSuccess: (Boolean?) -> Unit,
+        onError: (BridgeError) -> Unit
+    ): Closeable = subscribeTo(
+        writeScope, { saveCanvasEditUseCase(noteId, nodes, removedIds) }, {}, onSuccess, onError
+    )
+
+    // 📐 24-Sep-2026 — the one-time move of every stored canvas to the compact layout
+    fun upgradeLayouts(
+        unitScale: Float,
+        maxPaperWidth: Float,
+        onSuccess: (Int?) -> Unit,
+        onError: (BridgeError) -> Unit
+    ): Closeable = subscribeTo(
+        writeScope, { upgradeCanvasLayoutsUseCase(unitScale, maxPaperWidth) }, {}, onSuccess, onError
+    )
+
+    // 🔄 24-Sep-2026 — widgets whose content was deleted elsewhere, dropped before a board is read
+    fun pruneOrphans(
+        onSuccess: (Boolean?) -> Unit,
+        onError: (BridgeError) -> Unit
+    ): Closeable = subscribeTo(
+        writeScope, { pruneCanvasOrphansUseCase() }, {}, onSuccess, onError
+    )
+
+    // 🔄 24-Sep-2026 — a canvas another device saved, for the master editor that is open on this note
+    fun observeRemoteCanvas(noteId: String, onChange: (List<CanvasNode>) -> Unit): Closeable =
+        observeRemoteCanvasUseCase(noteId).watch(scope) { onChange(it) }
 
     fun dispose() = scope.cancel()
 }

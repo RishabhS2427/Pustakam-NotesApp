@@ -11,6 +11,7 @@ import com.app.pustakam.core.richtext.master.model.CanvasDocument
 import com.app.pustakam.core.richtext.master.model.CanvasNode
 import com.app.pustakam.core.richtext.master.model.CanvasRect
 import com.app.pustakam.core.richtext.master.model.Viewport
+import com.app.pustakam.core.richtext.master.presentation.CanvasCommands
 import com.app.pustakam.feature.notes.domain.repository.ICanvasRepository
 import com.app.pustakam.feature.notes.domain.repository.INoteSyncRepository
 import kotlinx.coroutines.withContext
@@ -78,4 +79,34 @@ internal class CanvasRepository : ICanvasRepository, KoinComponent {
 
     override suspend fun saveViewport(noteId: String, viewport: Viewport) =
         onIo { dao.saveViewport(noteId, viewport); viewport }
+
+    override suspend fun saveEdit(noteId: String, nodes: List<CanvasNode>, removedIds: List<String>) =
+        onIo { dao.applyEdit(noteId, nodes, removedIds); true }.also { publish(noteId) }
+
+    // 📐 all or nothing: a half-done upgrade would scale some canvases twice on the next launch
+    override suspend fun upgradeLayouts(unitScale: Float, maxPaperWidth: Float) = onIo {
+        var upgraded = 0
+        database.transaction {
+            dao.noteIdsWithCanvas().forEach { noteId ->
+                val stored = dao.nodes(noteId)
+                val next = CanvasCommands.upgradedLayout(stored, unitScale, maxPaperWidth)
+                if (next != stored) {
+                    dao.replaceAll(noteId, next)
+                    upgraded++
+                }
+                if (unitScale != 1f) {
+                    dao.viewport(noteId)?.let { viewport ->
+                        dao.saveViewport(
+                            noteId,
+                            viewport.copy(
+                                offsetX = viewport.offsetX * unitScale,
+                                offsetY = viewport.offsetY * unitScale
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        upgraded
+    }
 }

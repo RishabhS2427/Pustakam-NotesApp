@@ -1,0 +1,20 @@
+-- 📄 23-Sep-2026 master editor: a canvas page becomes a CONTAINER that carries many contents
+--   instead of standing for one of them. Three columns are ADDED to CanvasNodeEntity and nothing
+--   existing is dropped, retyped or renamed, so an install that already has notes keeps every one
+--   of them and every node it had drawn.
+--
+--   role      — 'PAGE' is paper, 'WIDGET' is one NoteContent. The default is 'WIDGET' so old rows
+--               read back exactly as they behaved; CanvasUpgrade promotes the real pages on load.
+--   slotOrder — a widget's place in the note's single linear order. REAL, not INTEGER, for the
+--               same reason NoteContent.position is: dropping between 3 and 4 stores 3.5, so a
+--               drag rewrites ONE row and never renumbers the rest.
+--   pageOrder — a page's place among pages, fractional for the same reason.
+
+ALTER TABLE CanvasNodeEntity ADD COLUMN role TEXT NOT NULL DEFAULT 'WIDGET';
+
+ALTER TABLE CanvasNodeEntity ADD COLUMN slotOrder REAL NOT NULL DEFAULT 0.0;
+
+ALTER TABLE CanvasNodeEntity ADD COLUMN pageOrder REAL NOT NULL DEFAULT 0.0;
+
+-- Reading a note back is "pages in order, then the widgets on each"; without this that scans.
+CREATE INDEX IF NOT EXISTS idx_canvasnode_order ON CanvasNodeEntity(noteId, role, pageOrder, slotOrder);

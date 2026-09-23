@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredSizeIn
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.app.pustakam.android.MyApplicationTheme
 import com.app.pustakam.android.extension.actionIconButtonBackground
@@ -50,6 +52,10 @@ fun ImageCard(modifier: Modifier = Modifier,
               onShowActions: (Boolean) -> Unit = {},
               // 📥 20-Sep-2026 — optional so the previews and any caller without a block still compile
               media: NoteContentModel.MediaContent? = null,
+              // 🧱 24-Sep-2026 — the master canvas sizes the card itself; the defaults keep every other screen as it was
+              widthFraction: Float = 0.7f,
+              fixedHeight: Dp? = null,
+              outerPadding: Dp = 8.dp,
               overlay: @Composable BoxScope.() -> Unit = {}) {
     val scope = rememberCoroutineScope()
     // 🔧 14-Jul-2026: pending auto-hide; cancelled and restarted on every long-press
@@ -57,9 +63,10 @@ fun ImageCard(modifier: Modifier = Modifier,
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val cardHeight = (screenHeightDp * 0.42f).dp.coerceIn(260.dp, 460.dp)
 
-        Card(modifier = Modifier.fillMaxWidth(0.7f).requiredHeight(cardHeight)
+        Card(modifier = Modifier.fillMaxWidth(widthFraction)
+            .then(if (fixedHeight != null) Modifier.height(fixedHeight) else Modifier.requiredHeight(cardHeight))
             .clickable{ onClick()}
-            .padding(8.dp),
+            .padding(outerPadding),
             elevation =CardDefaults.cardElevation(defaultElevation = 6.dp),
             shape = RoundedCornerShape(14.dp),
         ) {

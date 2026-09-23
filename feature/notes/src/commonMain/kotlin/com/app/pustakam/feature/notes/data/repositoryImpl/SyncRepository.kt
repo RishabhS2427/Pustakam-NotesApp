@@ -9,6 +9,7 @@ import com.app.pustakam.core.common.util.getCurrentTimestamp
 import com.app.pustakam.core.common.util.log_d
 import com.app.pustakam.core.data.base.BaseRepository
 import com.app.pustakam.core.database.localdb.database.SYNC_STATUS_SYNCED
+import com.app.pustakam.core.database.localdb.database.toCanvasNode
 import com.app.pustakam.core.model.models.BaseResponse
 import com.app.pustakam.core.media.download.MediaDownloadCoordinator
 import com.app.pustakam.core.media.download.MediaLandingHandler
@@ -563,6 +564,10 @@ internal class SyncRepository : BaseRepository(), ISyncRepository, MediaLandingH
      *  local edits, so a note open on both devices picks the other one's change up live. */
     private fun publishToOpenEditor(note: Note) {
         if (note.deleted) return
+        // 🔄 24-Sep-2026 — the layout lands before the contents, so an open master editor finds every new content already placed
+        note.canvas?.takeIf { it.isNotEmpty() }?.let { canvas ->
+            noteBus.publishRemoteCanvas(note.id, canvas.map { it.toCanvasNode() })
+        }
         noteBus.publishContents(note.id, note.contents)
     }
 

@@ -20,3 +20,8 @@ class ObserveCanvasNodesUseCase : NoteSyncBaseUseCase() {
     operator fun invoke(noteId: String): Flow<List<CanvasNode>> =
         syncRepository.observeCanvasNodes(noteId)
 }
+
+class ObserveRemoteCanvasUseCase : NoteSyncBaseUseCase() {
+    operator fun invoke(noteId: String): Flow<List<CanvasNode>> =
+        syncRepository.observeRemoteCanvas(noteId)
+}

@@ -3,9 +3,11 @@ package com.app.pustakam.core.richtext.master.presentation
 import com.app.pustakam.core.common.util.ContentType
 import com.app.pustakam.core.richtext.master.model.CanvasDocument
 import com.app.pustakam.core.richtext.master.model.CanvasNode
+import com.app.pustakam.core.richtext.master.model.CanvasRole
 
 import com.app.pustakam.core.richtext.master.model.CanvasRect
 import com.app.pustakam.core.richtext.master.model.Viewport
+import kotlin.math.abs
 
 enum class CanvasTool {
     SELECT,
@@ -31,6 +33,13 @@ data class CanvasPermits(
     val canMutateDocument: Boolean
 )
 
+/**
+ * 📄 23-Sep-2026 — a one-shot ask for the platform to scroll [pageId]'s content to its end. The
+ * scroll offset itself lives in the platform's scroll view; [token] only grows, so the platform
+ * acts on each request exactly once.
+ */
+data class PageScrollRequest(val pageId: String, val token: Int)
+
 data class CanvasEditorState(
     val document: CanvasDocument = CanvasDocument(),
     val viewport: Viewport = Viewport(),
@@ -39,7 +48,8 @@ data class CanvasEditorState(
     val draggingNodeId: String? = null,
     val editingNodeId: String? = null,
     val resizingNodeId: String? = null,
-    val focusedRect: CanvasRect? = null
+    val focusedRect: CanvasRect? = null,
+    val scrollRequest: PageScrollRequest? = null
 ) {
     val visibleNodes: List<CanvasNode>
         get() = document.visibleIn(viewport.visibleRect)
@@ -152,6 +162,24 @@ sealed class CanvasEditorIntent {
 
     data class FocusNode(val nodeId: String) : CanvasEditorIntent()
 
+    /** A tap on paper: fit the page, scroll it to its end, keyboard away. */
+    data class FocusPage(val pageId: String) : CanvasEditorIntent()
+
+    /**
+     * A lifted widget let go. [pageId] null means it was released over bare canvas, and it
+     * goes back exactly where it came from; otherwise ([x], [y]) is its top-left on that page's
+     * content.
+     */
+    data class DropWidget(
+        val nodeId: String,
+        val pageId: String?,
+        val x: Float,
+        val y: Float
+    ) : CanvasEditorIntent()
+
+    /** The device measured a widget's content; its height follows, never its width. */
+    data class MeasureWidget(val nodeId: String, val height: Float) : CanvasEditorIntent()
+
     data class SelectAt(val screenX: Float, val screenY: Float) : CanvasEditorIntent()
 
     data class SelectNode(val nodeId: String?) : CanvasEditorIntent()
@@ -184,27 +212,32 @@ sealed class CanvasEditorIntent {
     data class ReparentNode(val nodeId: String, val parentId: String?) : CanvasEditorIntent()
 
     data class ReplaceDocument(val document: CanvasDocument) : CanvasEditorIntent()
+
+    // 🔄 24-Sep-2026 — the canvas another device saved arrived; [keepLocal] are the nodes touched here since
+    data class AdoptRemote(val nodes: List<CanvasNode>, val keepLocal: Set<String>) : CanvasEditorIntent()
+
+    // 📄 24-Sep-2026 — scroll a page to its end without fitting it, e.g. after a widget was added there
+    data class RevealEnd(val pageId: String) : CanvasEditorIntent()
 }
 
 const val EDIT_TOP_INSET = 12f
 
 const val PAGE_SCREEN_MARGIN = 16f
 
+// 🧱 24-Sep-2026 — how far a drop may land from where the widget was and still count as not moved
+const val DROP_TOLERANCE = 2f
+
 object CanvasEditorReducer {
 
     fun reduce(state: CanvasEditorState, intent: CanvasEditorIntent): CanvasEditorState =
         if (blocked(state, intent)) state else apply(state, intent)
 
-
     /**
-     * A single tap on a page enters edit mode: the canvas stays at 100%, the page itself is
-     * resized to the device screen less a margin, and the permits for EDITING lock it there.
-     * Growing widgets scroll inside the page and never move its boundary.
+     * 📄 23-Sep-2026 — fits [page] to the screen at 100%. Only the PAPER takes the screen's size;
+     * the widgets on it keep theirs, and whatever no longer fits is scrolled to inside the page.
+     * Neighbouring pages move aside, so a fitted page never lands on another one.
      */
-    private fun fittedToScreen(
-        state: CanvasEditorState,
-        page: CanvasNode
-    ): CanvasEditorState {
+    private fun fittedToScreen(state: CanvasEditorState, page: CanvasNode): CanvasEditorState {
         val viewport = state.viewport
         if (viewport.widthPx <= 0f || viewport.heightPx <= 0f) return state
         val width = viewport.widthPx - PAGE_SCREEN_MARGIN * 2f
@@ -212,16 +245,119 @@ object CanvasEditorReducer {
         if (width <= CanvasNode.MIN_SIZE || height <= CanvasNode.MIN_SIZE) return state
 
         val resized = page.resizedTo(width, height)
-        val settled = state.document.replacing(resized)
-            .withoutOverlap(resized, CanvasNode.DEFAULT_GAP)
         return state.copy(
-            document = state.document.replacing(settled),
+            document = state.document.replacing(resized).pagesClearOf(resized.id),
             viewport = viewport.copy(
                 scale = Viewport.DEFAULT_SCALE,
-                offsetX = PAGE_SCREEN_MARGIN - settled.rect.x,
-                offsetY = PAGE_SCREEN_MARGIN - settled.rect.y
+                offsetX = PAGE_SCREEN_MARGIN - resized.rect.x,
+                offsetY = PAGE_SCREEN_MARGIN - resized.rect.y
             )
         )
+    }
+
+    /** A tap on paper: the page is fitted, scrolled to its end, and the keyboard goes away. */
+    private fun focusedPage(state: CanvasEditorState, page: CanvasNode): CanvasEditorState =
+        fittedToScreen(
+            state.copy(
+                selectedNodeId = page.id,
+                editingNodeId = null,
+                focusedRect = null,
+                scrollRequest = PageScrollRequest(page.id, (state.scrollRequest?.token ?: 0) + 1)
+            ),
+            page
+        )
+
+    /**
+     * A text widget taking the keyboard: its page is fitted to the screen and the platform keeps
+     * the caret in view inside the page, exactly as when a page was one text field.
+     */
+    private fun editingText(state: CanvasEditorState, widget: CanvasNode): CanvasEditorState {
+        val editing = state.copy(
+            editingNodeId = widget.id,
+            draggingNodeId = null,
+            resizingNodeId = null,
+            focusedRect = state.focusedRect ?: state.viewport.visibleRect
+        )
+        val page = state.document.pageOf(widget.id) ?: return editing
+        return fittedToScreen(editing.copy(selectedNodeId = page.id), page)
+    }
+
+    /** The keyboard going away: back to the view the writer had before editing began. */
+    private fun leftEditing(state: CanvasEditorState): CanvasEditorState = state.copy(
+        editingNodeId = null,
+        viewport = state.focusedRect?.let { state.viewport.focusedOn(it) } ?: state.viewport,
+        focusedRect = null
+    )
+
+    /** The page that adopts the widgets of a page being removed: the one before it, else after. */
+    private fun neighbourPage(document: CanvasDocument, page: CanvasNode): CanvasNode? {
+        val others = document.pages.filterNot { it.id == page.id }
+        return others.lastOrNull { it.pageOrder < page.pageOrder } ?: others.firstOrNull()
+    }
+
+    /**
+     * Removing a page never deletes what is on it: its widgets move onto the neighbouring page,
+     * under what that page already holds, keeping their own layout. The last page is never
+     * removed — a note always shows at least one sheet of paper.
+     */
+    private fun withoutPage(document: CanvasDocument, page: CanvasNode): CanvasDocument {
+        val host = neighbourPage(document, page) ?: return document
+        val orphans = document.widgetsInReadingOrder(page.id)
+        val remaining = document.removing(page.id)
+        if (orphans.isEmpty()) return remaining
+        val top = document.contentExtentOf(host.id).height
+            .takeIf { it > 0f } ?: CanvasNode.PAGE_PADDING
+        val shift = top - orphans.minOf { it.rect.y }
+        return remaining
+            .replacingAll(
+                orphans.map { it.copy(parentId = host.id, rect = it.rect.translated(0f, shift)) }
+            )
+            .settledWidgetsOn(host.id)
+    }
+
+    /**
+     * 🧱 23-Sep-2026 — a lifted widget released over [page] with its top-left at ([x], [y]) on the
+     * page's content. It never lands left of or above the paper, never past its right edge while
+     * it fits, and never on another widget — it slides down to the first free spot — and it
+     * takes its place in the note's reading order.
+     */
+    private fun droppedOn(
+        document: CanvasDocument,
+        widget: CanvasNode,
+        page: CanvasNode,
+        x: Float,
+        y: Float
+    ): CanvasDocument {
+        val reach = document.nodes
+            .filter { it.isWidget && it.parentId == page.id && it.id != widget.id }
+            .maxOfOrNull { it.rect.right + CanvasNode.PAGE_PADDING }
+            ?.let { maxOf(it, page.rect.width) }
+            ?: page.rect.width
+        val wanted = CanvasRect(
+            x = x.coerceIn(0f, maxOf(0f, reach - widget.rect.width)),
+            y = maxOf(0f, y),
+            width = widget.rect.width,
+            height = widget.rect.height
+        )
+        val spot = document.freeSpotOn(page.id, wanted, widget.id)
+        val order = document.slotOrderAt(page.id, spot.x, spot.y, widget.id)
+        val previousPageId = widget.parentId
+        val placed = document
+            .replacing(widget.copy(parentId = page.id, rect = spot, slotOrder = order))
+            .withReadingOrderOn(page.id)
+        return if (previousPageId == null || previousPageId == page.id) placed
+        else placed.withReadingOrderOn(previousPageId)
+    }
+
+    /** A new node: paper finds a free place on the board, a widget a free spot on its page. */
+    private fun added(document: CanvasDocument, node: CanvasNode): CanvasDocument {
+        if (node.isPage) {
+            val placed = document.withoutOverlap(node, CanvasNode.DEFAULT_GAP)
+            return document.adding(placed).broughtToFront(placed.id)
+        }
+        val pageId = node.parentId ?: return document.adding(node)
+        val spot = document.freeSpotOn(pageId, node.rect, node.id)
+        return document.adding(node.copy(rect = spot)).withReadingOrderOn(pageId)
     }
 
     private fun blocked(state: CanvasEditorState, intent: CanvasEditorIntent): Boolean {
@@ -234,18 +370,27 @@ object CanvasEditorReducer {
             CanvasEditorIntent.ZoomOut,
             CanvasEditorIntent.ZoomToFit -> !permits.canZoom
 
-            is CanvasEditorIntent.BeginDrag -> !permits.canDragNode
+            // 🧱 24-Sep-2026 — a long-press may pick a widget up while text is being typed; the keyboard goes away
+            is CanvasEditorIntent.BeginDrag ->
+                !permits.canDragNode && state.gesture != CanvasGesture.EDITING
             is CanvasEditorIntent.DragBy -> !permits.canDragNode
             is CanvasEditorIntent.BeginResize -> !permits.canResizeNode
             is CanvasEditorIntent.ResizeNode -> !permits.canResizeNode
             is CanvasEditorIntent.SetEditing ->
                 intent.nodeId != null && !permits.canEditText
 
+            // a tap on paper works while typing (it puts the keyboard away) but never mid-gesture
+            is CanvasEditorIntent.FocusPage ->
+                state.gesture == CanvasGesture.DRAGGING ||
+                    state.gesture == CanvasGesture.RESIZING ||
+                    (state.gesture == CanvasGesture.NONE && !permits.canSelect)
+
             is CanvasEditorIntent.AddNode,
             is CanvasEditorIntent.RemoveNode,
             is CanvasEditorIntent.ReparentNode,
             is CanvasEditorIntent.RenameNode -> !permits.canMutateDocument
 
+            // a lift must always be able to finish, and content can always report its size
             else -> false
         }
     }
@@ -290,104 +435,94 @@ object CanvasEditorReducer {
             }
 
             is CanvasEditorIntent.FocusNode -> {
-                val node = state.document.nodeById(intent.nodeId)
-                if (node == null) state
-                else fittedToScreen(state.copy(selectedNodeId = node.id), node)
+                val page = state.document.pageOf(intent.nodeId)
+                if (page == null) state
+                else fittedToScreen(state.copy(selectedNodeId = page.id), page)
             }
 
-            // tapping the node that is already being edited must NOT drop focus — doing so
-            // resigned and re-claimed the iOS keyboard on every tap inside the text
+            is CanvasEditorIntent.FocusPage ->
+                state.document.nodeById(intent.pageId)
+                    ?.takeIf { it.isPage }
+                    ?.let { focusedPage(state, it) }
+                    ?: state
+
+            // 📄 paper and widgets answer their own taps. A tap that still reaches the board
+            //   over a page came through a widget, and must not undo what that widget just did.
             is CanvasEditorIntent.SelectAt -> {
-                val canvasX = state.viewport.toCanvasX(intent.screenX)
-                val canvasY = state.viewport.toCanvasY(intent.screenY)
-                val hit = state.document.hitTest(canvasX, canvasY)
-                val staysEditing = state.editingNodeId != null && state.editingNodeId == hit?.id
-                if (staysEditing) {
-                    state.copy(selectedNodeId = hit?.id)
-                } else if (hit != null && hit.isPage) {
-                    fittedToScreen(
-                        state.copy(
-                            selectedNodeId = hit.id,
-                            editingNodeId = hit.id,
-                            focusedRect = null
-                        ),
-                        hit
-                    )
-                } else {
-                    state.copy(
-                        selectedNodeId = hit?.id,
-                        editingNodeId = null,
-                        viewport = state.focusedRect
-                            ?.let { state.viewport.focusedOn(it) } ?: state.viewport,
-                        focusedRect = null
-                    )
-                }
+                val hit = state.document.hitTest(
+                    state.viewport.toCanvasX(intent.screenX),
+                    state.viewport.toCanvasY(intent.screenY)
+                )
+                if (hit != null) state
+                else leftEditing(state).copy(selectedNodeId = null)
             }
 
             is CanvasEditorIntent.SelectNode -> {
                 val node = intent.nodeId?.let { state.document.nodeById(it) }
-                if (node != null && node.isPage && state.editingNodeId != node.id) {
-                    fittedToScreen(
-                        state.copy(
-                            selectedNodeId = node.id,
-                            editingNodeId = node.id,
-                            focusedRect = null
-                        ),
-                        node
-                    )
-                } else {
-                    state.copy(
-                        selectedNodeId = intent.nodeId,
-                        editingNodeId = state.editingNodeId.takeIf { it == intent.nodeId }
+                when {
+                    node == null -> state.copy(selectedNodeId = null, editingNodeId = null)
+                    node.isPage -> focusedPage(state, node)
+                    node.isTextWidget -> editingText(state, node)
+                    else -> state.copy(
+                        selectedNodeId = state.document.pageOf(node.id)?.id ?: state.selectedNodeId
                     )
                 }
             }
 
-            is CanvasEditorIntent.BeginDrag -> state.copy(
-                draggingNodeId = intent.nodeId,
-                selectedNodeId = intent.nodeId,
-                document = state.document.broughtToFront(intent.nodeId)
-            )
+            // 📄 lifting a widget only marks it: the platform carries it on its own layer, so a
+            //   drag costs no document update per frame and the page just hides the lifted one
+            is CanvasEditorIntent.BeginDrag -> {
+                val node = state.document.nodeById(intent.nodeId)
+                val carrying = state.copy(editingNodeId = null, focusedRect = null)
+                when {
+                    node == null || node.locked || node.id == state.editingNodeId -> state
+                    node.isPage -> carrying.copy(
+                        draggingNodeId = node.id,
+                        selectedNodeId = node.id,
+                        document = state.document.broughtToFront(node.id)
+                    )
 
+                    else -> carrying.copy(draggingNodeId = node.id)
+                }
+            }
+
+            // only paper moves frame by frame; a widget's rect is relative, so it rides along
             is CanvasEditorIntent.DragBy -> {
-                val node = state.draggingNodeId
+                val page = state.draggingNodeId
                     ?.let { state.document.nodeById(it) }
-                    ?.takeIf { !it.locked }
-                if (node == null) {
+                    ?.takeIf { it.isPage && !it.locked }
+                if (page == null) {
                     state
                 } else {
                     val dx = intent.deltaX / state.viewport.scale
                     val dy = intent.deltaY / state.viewport.scale
-                    // a page carries the widgets sitting on it
-                    val moved = (listOf(node) + state.document.descendantsOf(node.id))
-                        .map { it.movedBy(dx, dy) }
-                    state.copy(document = state.document.replacingAll(moved))
+                    state.copy(document = state.document.replacing(page.movedBy(dx, dy)))
                 }
             }
 
-            // a widget released over a page joins that page; released on bare canvas it leaves
+            // a page let go slides right past any page it landed on — pages never overlap
             CanvasEditorIntent.EndDrag -> {
-                val dragged = state.draggingNodeId?.let { state.document.nodeById(it) }
-                if (dragged == null) {
-                    state.copy(draggingNodeId = null)
-                } else if (dragged.isPage) {
-                    val settled = state.document.withoutOverlap(dragged, CanvasNode.DEFAULT_GAP)
-                    val shiftX = settled.rect.x - dragged.rect.x
-                    val moved = listOf(settled) + state.document.descendantsOf(dragged.id)
-                        .map { it.movedBy(shiftX, 0f) }
-                    state.copy(
-                        draggingNodeId = null,
-                        document = state.document.replacingAll(moved)
-                    )
-                } else {
-                    val target = state.document.pageAt(dragged.rect.centerX, dragged.rect.centerY)
-                    val document =
-                        if (target?.id == dragged.parentId) state.document
-                        else state.document
-                            .replacing(dragged.reparentedTo(target?.id))
-                            .broughtToFront(dragged.id)
-                    state.copy(draggingNodeId = null, document = document)
-                }
+                val page = state.draggingNodeId
+                    ?.let { state.document.nodeById(it) }
+                    ?.takeIf { it.isPage }
+                val document = page
+                    ?.let { state.document.withoutOverlap(it, CanvasNode.DEFAULT_GAP) }
+                    ?.let { state.document.replacing(it) }
+                    ?: state.document
+                state.copy(draggingNodeId = null, document = document)
+            }
+
+            is CanvasEditorIntent.DropWidget -> {
+                val widget = state.document.nodeById(intent.nodeId)?.takeIf { it.isWidget }
+                val page = intent.pageId?.let { state.document.nodeById(it) }?.takeIf { it.isPage }
+                // 🧱 24-Sep-2026 — let go where it was picked up: nothing moved, so nothing is written or sent
+                val stayed = widget != null && page != null && widget.parentId == page.id &&
+                    abs(widget.rect.x - intent.x) < DROP_TOLERANCE &&
+                    abs(widget.rect.y - intent.y) < DROP_TOLERANCE
+                val document =
+                    if (widget == null || page == null || stayed) state.document
+                    else droppedOn(state.document, widget, page, intent.x, intent.y)
+                state.copy(draggingNodeId = null, document = document)
             }
 
             is CanvasEditorIntent.ReparentNode -> {
@@ -400,33 +535,54 @@ object CanvasEditorReducer {
                 )
             }
 
+            // 📄 paper resized by its handle pushes neighbouring pages aside; its widgets never
+            //   change — whatever no longer fits is scrolled to
             is CanvasEditorIntent.ResizeNode -> {
                 val node = state.document.nodeById(intent.nodeId)
                 if (node == null) {
                     state
                 } else {
+                    val resized = node.resizedTo(intent.width, intent.height)
+                    val document = state.document.replacing(resized)
                     state.copy(
-                        document = state.document.replacing(
-                            node.resizedTo(intent.width, intent.height)
-                        )
+                        document =
+                            if (resized.isPage) document.pagesClearOf(resized.id)
+                            else document.pushedClearOf(resized.id)
+                    )
+                }
+            }
+
+            // 🧱 a text widget grew as it was typed into: whatever it now covers moves down
+            is CanvasEditorIntent.MeasureWidget -> {
+                val widget = state.document.nodeById(intent.nodeId)?.takeIf { it.isWidget }
+                if (widget == null || widget.rect.height == intent.height) {
+                    state
+                } else {
+                    val measured = widget.resizedTo(widget.rect.width, intent.height)
+                    state.copy(
+                        document = state.document.replacing(measured).pushedClearOf(measured.id)
                     )
                 }
             }
 
             is CanvasEditorIntent.AddNode -> state.copy(
-                document = state.document.adding(intent.node).broughtToFront(intent.node.id),
-                selectedNodeId = intent.node.id
+                document = added(state.document, intent.node),
+                selectedNodeId = if (intent.node.isPage) intent.node.id else state.selectedNodeId
             )
 
-            // removing a page never deletes its widgets — they fall back onto the bare canvas
             is CanvasEditorIntent.RemoveNode -> {
                 val removed = state.document.nodeById(intent.nodeId)
-                val orphans = state.document.childrenOf(intent.nodeId)
-                    .map { it.reparentedTo(removed?.parentId) }
+                val document = when {
+                    removed == null -> state.document
+                    removed.isPage -> withoutPage(state.document, removed)
+                    else -> state.document.removing(removed.id)
+                }
+                val gone = document.nodeById(intent.nodeId) == null
                 state.copy(
-                    document = state.document.replacingAll(orphans).removing(intent.nodeId),
-                    selectedNodeId = state.selectedNodeId.takeIf { it != intent.nodeId },
-                    editingNodeId = state.editingNodeId.takeIf { it != intent.nodeId }
+                    document = document,
+                    selectedNodeId = state.selectedNodeId.takeUnless { gone && it == intent.nodeId },
+                    editingNodeId = state.editingNodeId.takeUnless { gone && it == intent.nodeId },
+                    draggingNodeId = state.draggingNodeId.takeUnless { gone && it == intent.nodeId }
                 )
             }
 
@@ -444,26 +600,11 @@ object CanvasEditorReducer {
 
             is CanvasEditorIntent.SetEditing -> {
                 val node = intent.nodeId?.let { state.document.nodeById(it) }
-                if (node == null) {
-                    state.copy(
-                        editingNodeId = null,
-                        viewport = state.focusedRect?.let { state.viewport.focusedOn(it) }
-                            ?: state.viewport,
-                        focusedRect = null
-                    )
-                } else {
-                    state.copy(
-                        editingNodeId = node.id,
-                        selectedNodeId = node.id,
-                        draggingNodeId = null,
-                        resizingNodeId = null,
-                        focusedRect = state.focusedRect ?: state.viewport.visibleRect,
-                        viewport = state.viewport.copy(
-                            scale = Viewport.DEFAULT_SCALE,
-                            offsetX = PAGE_SCREEN_MARGIN - node.rect.x,
-                            offsetY = PAGE_SCREEN_MARGIN - node.rect.y
-                        )
-                    )
+                when {
+                    node == null -> leftEditing(state)
+                    node.isPage -> focusedPage(state, node)
+                    node.isTextWidget -> editingText(state, node)
+                    else -> state
                 }
             }
 
@@ -481,7 +622,34 @@ object CanvasEditorReducer {
 
             is CanvasEditorIntent.ReplaceDocument ->
                 state.copy(document = intent.document, selectedNodeId = null, editingNodeId = null)
+
+            is CanvasEditorIntent.AdoptRemote -> adopted(state, intent.nodes, intent.keepLocal)
+
+            is CanvasEditorIntent.RevealEnd ->
+                if (state.document.nodeById(intent.pageId)?.isPage != true) state
+                else state.copy(
+                    scrollRequest = PageScrollRequest(intent.pageId, (state.scrollRequest?.token ?: 0) + 1)
+                )
         }
+
+    // 🔄 24-Sep-2026 — a canvas without paper is never taken; whatever was selected or edited stays so while it still exists
+    private fun adopted(
+        state: CanvasEditorState,
+        remote: List<CanvasNode>,
+        keepLocal: Set<String>
+    ): CanvasEditorState {
+        if (remote.none { it.isPage }) return state
+        val document = state.document.mergedWith(remote, keepLocal)
+        if (document.pages.isEmpty()) return state
+        fun live(nodeId: String?): String? = nodeId?.takeIf { document.nodeById(it) != null }
+        return state.copy(
+            document = document,
+            selectedNodeId = live(state.selectedNodeId),
+            editingNodeId = live(state.editingNodeId),
+            draggingNodeId = live(state.draggingNodeId),
+            resizingNodeId = live(state.resizingNodeId)
+        )
+    }
 }
 
 object CanvasCommands {
@@ -502,6 +670,17 @@ object CanvasCommands {
     fun zoomToFit(): CanvasEditorIntent = CanvasEditorIntent.ZoomToFit
 
     fun focusNode(nodeId: String): CanvasEditorIntent = CanvasEditorIntent.FocusNode(nodeId)
+
+    /** A tap on paper: fit the page, scroll it to its end, keyboard away. */
+    fun focusPage(pageId: String): CanvasEditorIntent = CanvasEditorIntent.FocusPage(pageId)
+
+    /** The device measured a widget's content height, in canvas units. */
+    fun widgetMeasured(nodeId: String, height: Float): CanvasEditorIntent =
+        CanvasEditorIntent.MeasureWidget(nodeId, height)
+
+    /** A lift that ended anywhere but over a page: the widget goes back where it was. */
+    fun cancelLift(nodeId: String): CanvasEditorIntent =
+        CanvasEditorIntent.DropWidget(nodeId, null, 0f, 0f)
 
     fun selectAt(screenX: Float, screenY: Float): CanvasEditorIntent =
         CanvasEditorIntent.SelectAt(screenX, screenY)
@@ -573,16 +752,28 @@ object CanvasCommands {
 
     fun beginResize(nodeId: String): CanvasEditorIntent = CanvasEditorIntent.BeginResize(nodeId)
 
+    /** Swift-facing factory — nested sealed subtypes are awkward to construct from Swift. */
+    fun resizeNode(nodeId: String, width: Float, height: Float): CanvasEditorIntent =
+        CanvasEditorIntent.ResizeNode(nodeId, width, height)
+
     fun endResize(): CanvasEditorIntent = CanvasEditorIntent.EndResize
 
     fun exitEditing(): CanvasEditorIntent = CanvasEditorIntent.SetEditing(null)
 
-    fun screenRectOf(node: CanvasNode, viewport: Viewport): CanvasRect = CanvasRect(
-        x = viewport.toScreenX(node.rect.x),
-        y = viewport.toScreenY(node.rect.y),
-        width = node.rect.width * viewport.scale,
-        height = node.rect.height * viewport.scale
-    )
+    /** 📄 goes through the document because a widget's rect is relative to its page. */
+    fun screenRectOf(
+        document: CanvasDocument,
+        node: CanvasNode,
+        viewport: Viewport
+    ): CanvasRect {
+        val rect = document.absoluteRectOf(node)
+        return CanvasRect(
+            x = viewport.toScreenX(rect.x),
+            y = viewport.toScreenY(rect.y),
+            width = rect.width * viewport.scale,
+            height = rect.height * viewport.scale
+        )
+    }
 
     // 🔧 09-Aug-2026 G8: Swift cannot see Kotlin default arguments or nested sealed subtypes,
     //   so every construction and every intent test below is exposed as a plain function
@@ -633,19 +824,124 @@ object CanvasCommands {
         CanvasEditorIntent.ZoomToFit,
         is CanvasEditorIntent.SelectAt,
         is CanvasEditorIntent.SelectNode,
+        is CanvasEditorIntent.FocusPage,
+        is CanvasEditorIntent.SetEditing,
         is CanvasEditorIntent.FocusNode -> true
 
         else -> false
     }
 
-    /** The text field a freshly opened canvas should land in. */
-    fun lastTextNodeId(state: CanvasEditorState): String? = state.document.pages.lastOrNull()?.id
+    /** The text field a freshly opened canvas should land in — the last text widget written. */
+    fun lastTextNodeId(state: CanvasEditorState): String? =
+        state.document.orderedWidgets.lastOrNull { it.isTextWidget }?.id
+
+    /** The paper width a page fitted to this screen gets — what new pages are cut to. */
+    fun fittedPageWidth(state: CanvasEditorState): Float =
+        (state.viewport.widthPx - PAGE_SCREEN_MARGIN * 2f)
+            .takeIf { it > CanvasNode.MIN_SIZE } ?: CanvasNode.DEFAULT_TEXT_WIDTH
+
+    /** The paper height a page fitted to this screen gets. */
+    fun fittedPageHeight(state: CanvasEditorState): Float =
+        (state.viewport.heightPx - PAGE_SCREEN_MARGIN * 2f)
+            .takeIf { it > CanvasNode.MIN_SIZE } ?: CanvasNode.DEFAULT_TEXT_HEIGHT
+
+    /** The page a freshly opened canvas shows: the last one. */
+    fun lastPageId(state: CanvasEditorState): String? = state.document.pages.lastOrNull()?.id
+
+    /** The widgets a page draws inside itself, top to bottom. */
+    fun widgetsOnPage(state: CanvasEditorState, pageId: String): List<CanvasNode> =
+        state.document.widgetsInReadingOrder(pageId)
+
+    /** How far [pageId]'s content reaches, in canvas units — the page scrolls over this. */
+    fun contentExtentOf(state: CanvasEditorState, pageId: String): CanvasRect =
+        state.document.contentExtentOf(pageId)
+
+    /** The token of the newest "scroll to end" request for [pageId], or 0 when there is none. */
+    fun scrollTokenFor(state: CanvasEditorState, pageId: String): Int =
+        state.scrollRequest?.takeIf { it.pageId == pageId }?.token ?: 0
+
+    /** True while [nodeId] is lifted off its page and carried by the finger. */
+    fun isLifted(state: CanvasEditorState, nodeId: String): Boolean = state.draggingNodeId == nodeId
+
+    // 🧱 24-Sep-2026 — long-press picks something up when nothing else is in progress, or while text is being typed
+    fun canLift(state: CanvasEditorState): Boolean =
+        state.permits.canDragNode || state.gesture == CanvasGesture.EDITING
+
+    /** The page under the centre of a carried widget, in screen units — null over bare canvas. */
+    fun dropTargetAt(state: CanvasEditorState, screenX: Float, screenY: Float): CanvasNode? =
+        state.document.pageAt(state.viewport.toCanvasX(screenX), state.viewport.toCanvasY(screenY))
+
+    /**
+     * 🧱 23-Sep-2026 — a lifted widget let go with its top-left at ([screenX], [screenY]). The
+     * platform supplies only what it alone can measure — how far [target] is scrolled and how
+     * tall its name bar is, all in screen units — and the conversion to a spot on the page's
+     * content happens here, so both platforms place a drop identically. A null [target] means
+     * bare canvas: the widget goes back where it came from.
+     */
+    fun dropWidget(
+        state: CanvasEditorState,
+        widgetId: String,
+        target: CanvasNode?,
+        screenX: Float,
+        screenY: Float,
+        scrollX: Float,
+        scrollY: Float,
+        headerHeight: Float
+    ): CanvasEditorIntent {
+        if (target == null) return cancelLift(widgetId)
+        val scale = state.viewport.scale.takeIf { it > 0f } ?: 1f
+        val x = state.viewport.toCanvasX(screenX) - target.rect.x + scrollX / scale
+        val y = state.viewport.toCanvasY(screenY) - target.rect.y + (scrollY - headerHeight) / scale
+        return CanvasEditorIntent.DropWidget(widgetId, target.id, x, y)
+    }
+
+    /**
+     * What one reduce changed that must reach storage. Nothing is written while a drag or a
+     * resize is in progress; the node is written once when the finger lifts, together with
+     * every neighbour the settle moved — so a gesture costs one write, not one per frame.
+     */
+    fun nodesToSave(before: CanvasEditorState, next: CanvasEditorState): List<CanvasNode> {
+        if (next.gesture == CanvasGesture.DRAGGING || next.gesture == CanvasGesture.RESIZING) {
+            return emptyList()
+        }
+        val previous = before.document.nodes.associateBy { it.id }
+        val changed = next.document.nodes.filter { previous[it.id] != it }
+        val finished = listOfNotNull(before.draggingNodeId, before.resizingNodeId)
+            .mapNotNull { next.document.nodeById(it) }
+        // a resize pushes pages aside frame by frame, all of it unwritten until the finger lifts
+        val ended = before.gesture == CanvasGesture.DRAGGING || before.gesture == CanvasGesture.RESIZING
+        val settled = if (ended) next.document.pages else emptyList()
+        return (changed + finished + settled).distinctBy { it.id }
+    }
+
+    /** Ids a reduce removed from the board. */
+    fun removedNodeIds(before: CanvasEditorState, next: CanvasEditorState): List<String> {
+        val kept = next.document.nodes.map { it.id }.toSet()
+        return before.document.nodes.map { it.id }.filterNot { it in kept }
+    }
+
+    /** True when the note's reading order changed, so content positions must be re-stamped. */
+    fun orderChanged(before: CanvasEditorState, next: CanvasEditorState): Boolean {
+        if (next.gesture == CanvasGesture.DRAGGING) return false
+        return before.document.orderedWidgets.mapNotNull { it.contentId } !=
+            next.document.orderedWidgets.mapNotNull { it.contentId }
+    }
+
+    fun widgetsOf(state: CanvasEditorState, pageId: String): List<CanvasNode> =
+        state.document.widgetsOf(pageId)
+
+    fun pagesOf(state: CanvasEditorState): List<CanvasNode> = state.document.pages
+
+    fun absoluteRectOf(state: CanvasEditorState, node: CanvasNode): CanvasRect =
+        state.document.absoluteRectOf(node)
 
     /** The page a select has just fitted to the screen, so its new size can be stored. */
     fun fittedPageId(state: CanvasEditorState, intent: CanvasEditorIntent): String? =
         when (intent) {
             is CanvasEditorIntent.SelectAt,
-            is CanvasEditorIntent.SelectNode -> state.selectedNode?.takeIf { it.isPage }?.id
+            is CanvasEditorIntent.SelectNode,
+            is CanvasEditorIntent.FocusPage,
+            is CanvasEditorIntent.SetEditing -> state.selectedNode?.takeIf { it.isPage }?.id
 
             else -> null
         }
@@ -700,39 +996,38 @@ object CanvasCommands {
     fun reparentNode(nodeId: String, parentId: String?): CanvasEditorIntent =
         CanvasEditorIntent.ReparentNode(nodeId, parentId)
 
-    /** Stacks a new widget down the page, below whatever is already on it. */
+    /**
+     * A new widget, placed under everything already on the page, as wide as the paper less its
+     * margins. Its size is fixed from here on — only measured kinds take their content's height.
+     * The rect is relative to the page's content, and the slot order is the gap after the page's
+     * last widget.
+     */
     fun childNodeIn(
         state: CanvasEditorState,
         page: CanvasNode,
         kind: ContentType,
         contentId: String?
     ): CanvasNode {
-        val siblings = state.document.childrenOf(page.id)
-        val width = minOf(defaultWidth(kind), page.rect.width - PAGE_PADDING * 2f)
-        val top = siblings.maxOfOrNull { it.rect.bottom }?.plus(PAGE_PADDING)
-            ?: (page.rect.y + PAGE_PADDING)
+        val width = CanvasNode.widgetWidthFor(kind, page.rect.width)
+        val top = state.document.contentExtentOf(page.id).height
+            .takeIf { it > 0f } ?: PAGE_PADDING
         return CanvasNode.of(
             kind = kind,
             contentId = contentId,
-            x = page.rect.x + PAGE_PADDING,
+            x = PAGE_PADDING,
             y = top,
-            width = maxOf(width, CanvasNode.MIN_SIZE),
-            height = defaultHeight(kind),
+            width = width,
+            height = CanvasNode.widgetHeightFor(kind, width),
             parentId = page.id
+        ).copy(
+            role = CanvasRole.WIDGET,
+            slotOrder = state.document.slotOrderAt(page.id, PAGE_PADDING, top, null)
         )
     }
 
-    /**
-     * A new MASTER_TEXT is a new page beside the others; anything else is a widget placed on
-     * the selected page, falling back to free canvas when the note has no page yet.
-     */
+    /** Every content — text included — is a widget on the page the user is working on. */
     fun nodeFor(state: CanvasEditorState, kind: ContentType, contentId: String?): CanvasNode {
-        if (kind == ContentType.TEXT) {
-            val anchor = anchorOf(state)?.let { state.document.pageOf(it.id) }
-            return if (anchor == null) nodeAtEdge(state, kind, contentId)
-            else nodeNextTo(anchor, kind, contentId)
-        }
-        val page = selectedPage(state) ?: return nodeAtEdge(state, kind, contentId)
+        val page = pageForSpawn(state) ?: return nodeAtEdge(state, kind, contentId)
         return childNodeIn(state, page, kind, contentId)
     }
 
@@ -751,7 +1046,7 @@ object CanvasCommands {
         )
     }
 
-    const val PAGE_PADDING = 24f
+    const val PAGE_PADDING = CanvasNode.PAGE_PADDING
 
     const val CARET_MARGIN = 24f
 
@@ -761,17 +1056,110 @@ object CanvasCommands {
     fun caretRevealPadding(lineHeightPx: Float): Float =
         if (lineHeightPx > 0f) lineHeightPx * CARET_TRAILING_LINES else CARET_MARGIN
 
-    fun pageForSpawn(state: CanvasEditorState): CanvasNode? = selectedPage(state)
+    // 📄 24-Sep-2026 — the page being typed on, else the tapped page while it is on screen, else the page most in view, else the last
+    fun pageForSpawn(state: CanvasEditorState): CanvasNode? {
+        val document = state.document
+        state.editingNodeId?.let { editing -> document.pageOf(editing)?.let { return it } }
+        val viewport = state.viewport
+        val measured = viewport.widthPx > 0f && viewport.heightPx > 0f
+        val visible = viewport.visibleRect
+        val selected = state.selectedNodeId?.let { document.pageOf(it) }
+        if (selected != null && (!measured || selected.rect.intersects(visible))) return selected
+        if (measured) document.mostVisiblePage(visible)?.let { return it }
+        return document.pages.lastOrNull()
+    }
+
+    fun revealEnd(pageId: String): CanvasEditorIntent = CanvasEditorIntent.RevealEnd(pageId)
+
+    fun adoptRemote(nodes: List<CanvasNode>, keepLocal: Set<String>): CanvasEditorIntent =
+        CanvasEditorIntent.AdoptRemote(nodes, keepLocal)
+
+    fun isRemoteAdoption(intent: CanvasEditorIntent): Boolean =
+        intent is CanvasEditorIntent.AdoptRemote
+
+    // 🔄 24-Sep-2026 — another device's canvas waits while a finger is carrying or resizing something here
+    fun canAdoptRemote(state: CanvasEditorState): Boolean =
+        state.draggingNodeId == null && state.resizingNodeId == null
+
+    private fun isCarrying(state: CanvasEditorState): Boolean =
+        state.draggingNodeId != null || state.resizingNodeId != null
+
+    fun gestureStarted(before: CanvasEditorState, next: CanvasEditorState): Boolean =
+        !isCarrying(before) && isCarrying(next)
+
+    fun gestureEnded(before: CanvasEditorState, next: CanvasEditorState): Boolean =
+        isCarrying(before) && !isCarrying(next)
+
+    // 🔄 24-Sep-2026 — a layout change the user made travels to the other devices; a fit, a measure, a zoom or a remote canvas never does
+    fun editsLayout(
+        before: CanvasEditorState,
+        next: CanvasEditorState,
+        intent: CanvasEditorIntent,
+        gestureStart: CanvasDocument?
+    ): Boolean = when {
+        gestureEnded(before, next) -> (gestureStart ?: before.document) != next.document
+        else -> when (intent) {
+            is CanvasEditorIntent.AddNode,
+            is CanvasEditorIntent.RemoveNode,
+            is CanvasEditorIntent.RenameNode,
+            is CanvasEditorIntent.ReparentNode,
+            is CanvasEditorIntent.LinkNodes,
+            is CanvasEditorIntent.ReplaceDocument -> before.document != next.document
+
+            else -> false
+        }
+    }
+
+    // 🧱 24-Sep-2026 — how far a page scrolls this frame while a carried widget's finger is near an edge of its viewport
+    fun autoScrollStep(position: Float, start: Float, length: Float): Float {
+        if (length <= 0f) return 0f
+        val band = minOf(AUTO_SCROLL_BAND, length / 4f)
+        val fromStart = position - start
+        val fromEnd = start + length - position
+        return when {
+            fromStart < 0f || fromEnd < 0f -> 0f
+            fromStart < band -> -AUTO_SCROLL_MAX_STEP * (1f - fromStart / band)
+            fromEnd < band -> AUTO_SCROLL_MAX_STEP * (1f - fromEnd / band)
+            else -> 0f
+        }
+    }
+
+    // 📐 24-Sep-2026 — the one-time upgrade of a stored canvas: units to dp/pt, then every page restacked with compact cards and 8 spacing
+    fun upgradedLayout(nodes: List<CanvasNode>, unitScale: Float, maxPaperWidth: Float): List<CanvasNode> {
+        val scaled = if (unitScale == 1f) nodes else nodes.map { node ->
+            node.copy(
+                rect = CanvasRect(
+                    node.rect.x * unitScale,
+                    node.rect.y * unitScale,
+                    node.rect.width * unitScale,
+                    node.rect.height * unitScale
+                )
+            )
+        }
+        val document = CanvasDocument(scaled)
+        return document.pages.fold(document) { acc, page ->
+            val paper = if (maxPaperWidth > 0f) minOf(page.rect.width, maxPaperWidth) else page.rect.width
+            acc.restacked(page.id, paper)
+        }.nodes
+    }
+
+    const val AUTO_SCROLL_BAND = 56f
+
+    const val AUTO_SCROLL_MAX_STEP = 14f
 
     fun needsPage(state: CanvasEditorState): Boolean = state.document.pages.isEmpty()
 
-    fun pageNode(state: CanvasEditorState, contentId: String?): CanvasNode {
+    /** Fresh empty paper, placed to the right of the last page. */
+    fun pageNode(state: CanvasEditorState): CanvasNode {
         val anchor = state.document.pages.lastOrNull()
-        return if (anchor == null) {
-            CanvasNode.masterText(contentId = contentId, x = 0f, y = 0f)
-        } else {
-            nodeNextTo(anchor, ContentType.TEXT, contentId)
-        }
+            ?: return CanvasNode.page(order = 0.0, x = 0f, y = 0f)
+        return CanvasNode.page(
+            order = state.document.nextPageOrder(),
+            x = anchor.rect.right + CanvasNode.DEFAULT_GAP,
+            y = anchor.rect.y,
+            width = anchor.rect.width,
+            height = anchor.rect.height
+        )
     }
 
     fun widgetIn(
@@ -781,12 +1169,24 @@ object CanvasCommands {
         contentId: String?
     ): CanvasNode = childNodeIn(state, page, kind, contentId)
 
+    /** One page carrying the given text contents, stacked down the paper. */
     fun stackedTextNodes(contentIds: List<String>): List<CanvasNode> {
-        var y = 0f
-        return contentIds.mapIndexed { index, contentId ->
-            val node = CanvasNode.masterText(contentId = contentId, x = 0f, y = y)
-            y += CanvasNode.DEFAULT_TEXT_HEIGHT + CanvasNode.DEFAULT_GAP
-            node.copy(z = index)
+        val page = CanvasNode.page(order = 0.0, x = 0f, y = 0f)
+        val width = CanvasNode.widgetWidthOn(page.rect.width)
+        var y = PAGE_PADDING
+        val widgets = contentIds.mapIndexed { index, contentId ->
+            val node = CanvasNode.of(
+                kind = ContentType.TEXT,
+                contentId = contentId,
+                x = PAGE_PADDING,
+                y = y,
+                width = width,
+                height = CanvasNode.MEASURED_START_HEIGHT,
+                parentId = page.id
+            ).copy(z = index + 1, slotOrder = index.toDouble())
+            y += node.rect.height + CanvasNode.WIDGET_GAP
+            node
         }
+        return listOf(page) + widgets
     }
 }

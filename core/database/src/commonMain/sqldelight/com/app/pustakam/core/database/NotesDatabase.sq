@@ -76,12 +76,23 @@ z INTEGER NOT NULL DEFAULT 0,
 locked INTEGER NOT NULL DEFAULT 0,
 hidden INTEGER NOT NULL DEFAULT 0,
 links TEXT NOT NULL DEFAULT '',
+-- 📄 23-Sep-2026: PAGE = paper that carries widgets, WIDGET = one NoteContent. Before this a
+--   "page" was just a top-level TEXT node, which is why one page could hold only one content.
+role TEXT NOT NULL DEFAULT 'WIDGET',
+-- 📄 a WIDGET's place in the note's one linear order; a drop between 3 and 4 stores 3.5, so
+--   re-ordering writes a single row. Same reason NoteContent.position is REAL.
+slotOrder REAL NOT NULL DEFAULT 0.0,
+-- 📄 a PAGE's place among the pages, fractional for the same reason.
+pageOrder REAL NOT NULL DEFAULT 0.0,
 updatedAt TEXT
 );
 
 CREATE INDEX idx_canvasnode_note ON CanvasNodeEntity(noteId, z);
 
 CREATE INDEX idx_canvasnode_viewport ON CanvasNodeEntity(noteId, x, y);
+
+-- Reading a note back is "pages in order, then the widgets on each"; without this that scans
+CREATE INDEX idx_canvasnode_order ON CanvasNodeEntity(noteId, role, pageOrder, slotOrder);
 
 CREATE TABLE CanvasViewport(
 noteId TEXT NOT NULL PRIMARY KEY REFERENCES Notes(id) ON DELETE CASCADE,
@@ -335,8 +346,8 @@ SELECT id, label, color FROM Tags WHERE id = ?;
 
 
 upsertCanvasNode:
-INSERT OR REPLACE INTO CanvasNodeEntity(id, noteId, kind, name, contentId, parentId, x, y, width, height, z, locked, hidden, links, updatedAt)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+INSERT OR REPLACE INTO CanvasNodeEntity(id, noteId, kind, name, contentId, parentId, x, y, width, height, z, locked, hidden, links, role, slotOrder, pageOrder, updatedAt)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
 
 deleteCanvasNode:
 DELETE FROM CanvasNodeEntity WHERE id = ?;
@@ -365,6 +376,10 @@ deleteOrphanCanvasNodes:
 DELETE FROM CanvasNodeEntity
 WHERE contentId IS NOT NULL
 AND contentId NOT IN (SELECT id FROM NoteContent);
+
+-- 📐 24-Sep-2026 every note that has a canvas — the one-time layout upgrade walks these
+selectCanvasNoteIds:
+SELECT DISTINCT noteId FROM CanvasNodeEntity;
 
 moveCanvasNode:
 UPDATE CanvasNodeEntity SET x = ?, y = ?, updatedAt = ? WHERE id = ?;
