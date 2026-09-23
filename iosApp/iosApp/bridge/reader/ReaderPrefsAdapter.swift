@@ -19,7 +19,7 @@ import shared
     }
     func observeOfflineMode(onChange: @escaping (Bool) -> Void) {
         closeables.append(bridge.observeOfflineMode { raw in
-            onChange(raw ?? false)
+            onChange(raw.boolValue)
         })
     }
 

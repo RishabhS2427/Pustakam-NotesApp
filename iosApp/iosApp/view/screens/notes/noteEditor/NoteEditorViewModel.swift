@@ -1,5 +1,6 @@
 import shared
 import Combine
+import Foundation
 import SwiftUI
 
 /// Single UI-state surface for the editor (mirror of the list slice pattern).
@@ -23,6 +24,9 @@ class NoteEditorViewModel: ObservableObject {
     private var contentUpdatesHandle: Closeable?
     private var contentSyncHandle: Closeable?
     private var dirtyContentIds = Set<String>()
+    // ✍️ 23-Sep-2026 — a deleted row leaves no dirty id behind, so remember the note changed anyway
+    private var structureChanged = false
+    private var autoSaveTimer: Timer?
 
     @Published private(set) var history = NoteHistory(
         past: [],
@@ -69,9 +73,11 @@ class NoteEditorViewModel: ObservableObject {
         self.contentBridge = contentBridge
         load(noteId: noteId)
         observeContentUpdates()
+        startAutoSave()
     }
 
     deinit {
+        autoSaveTimer?.invalidate()
         contentUpdatesHandle?.close()
         contentSyncHandle?.close()
         contentBridge.dispose()
@@ -329,11 +335,13 @@ class NoteEditorViewModel: ObservableObject {
             onSaved(); return
         }
         let toSave = note.withTitleAndContents(newTitle: state.title, newContents: state.noteContents)
+        state.note = toSave   // ✍️ Android parity: the screen's note IS what is being written, so nothing reads as unsaved after it
         let dirtySnapshot = dirtyContentIds
         adapter.createOrUpdateNote(note: toSave, dirtyContentIds: dirtySnapshot) { [weak self] result in
             switch result {
             case .success:
                 self?.dirtyContentIds.subtract(dirtySnapshot)
+                self?.structureChanged = false
                 onSaved()
             case .failure(let error):
                 // still navigate — the reader will show its own error if the file truly can't load
@@ -355,6 +363,27 @@ class NoteEditorViewModel: ObservableObject {
     }
 
 
+    // ✍️ 23-Sep-2026 — an edit reaches the disk (and the sync queue) within 5s, not only when the screen closes
+    private func startAutoSave() {
+        autoSaveTimer?.invalidate()
+        let seconds = Double(EditorCommands.shared.autoSaveMillis()) / 1000.0
+        autoSaveTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
+            self?.saveIfChanged()
+        }
+    }
+
+    // ✍️ what the disk has not seen yet: an edited row, a deleted one, or a retitled note
+    private var hasPendingChanges: Bool {
+        guard let note = state.note else { return false }
+        return structureChanged || !dirtyContentIds.isEmpty || state.title != (note.title ?? "")
+    }
+
+    // ✍️ 23-Sep-2026 — closing an UNTOUCHED note must not re-stamp it: that push overwrote the other device's newer copy
+    func saveIfChanged() {
+        guard hasPendingChanges else { return }
+        saveNote()
+    }
+
     func saveNote() {
          guard !state.isDeleted, let note = state.note, isNoteValid() else { return }
         
@@ -369,12 +398,14 @@ class NoteEditorViewModel: ObservableObject {
             newTitle: state.title,
             newContents: state.noteContents
         )
+        state.note = toSave   // ✍️ Android parity: the screen's note IS what is being written, so nothing reads as unsaved after it
 
         let dirtySnapshot = dirtyContentIds
         adapter.createOrUpdateNote(note: toSave, dirtyContentIds: dirtySnapshot) { [weak self] result in
             switch result {
             case .success:
                 self?.dirtyContentIds.subtract(dirtySnapshot)
+                self?.structureChanged = false
             case .failure(let error):
                 self?.state.errorMessage = error.message
                 print("saveNote failed [\(error.code)] \(error.message)")
@@ -413,6 +444,7 @@ class NoteEditorViewModel: ObservableObject {
             history = history.recordDeleteContent(previous: snapshot)
         }
         dirtyContentIds.remove(contentId)   // 🔧 15-Jul-2026 iOS parity: deleted → nothing to save
+        structureChanged = true   // ✍️ the row is gone; nothing dirty is left to prove the note changed
         guard let content = state.noteContents.first(where: { $0.id == contentId }) else { return }
 
         // 1. remove local media file (image/video/audio) — safe no-op for text

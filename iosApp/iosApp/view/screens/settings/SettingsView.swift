@@ -71,10 +71,11 @@ struct SettingsView: View {
                                     title: "Auto backup", subtitle: "Daily · encrypted", isOn: true)
                         SettingsRow(icon: "arrow.left.arrow.right", tint: Theme.Colors.copper,
                                     title: "Offline mode", subtitle: "Keep all notes on device",
+                                    isOn: offlineMode,
                                     onToggle: { isOn in
                                         readerPrefs.setOfflineMode(isOn)
                                     },
-                                    isOn: offlineMode, isLast: true)
+                                    isLast: true)
                     }
                 }
 

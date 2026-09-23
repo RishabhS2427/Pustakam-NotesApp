@@ -165,7 +165,7 @@ struct NoteEditorView: View {
                 }
             }
         }
-        .onDisappear {saveNote() }
+        .onDisappear { noteEditorViewModel.saveIfChanged() }
         .onAppear { noteEditorViewModel.refresh() }
         // 🔄 28-Aug-2026 — pull down inside the editor to fetch this note's latest content
         .refreshable { await noteEditorViewModel.syncNowAndReload() }
@@ -178,7 +178,7 @@ struct NoteEditorView: View {
             NotificationCenter.default.publisher(
                 for: UIApplication.willResignActiveNotification
             )
-        ) { _ in saveNote() }
+        ) { _ in noteEditorViewModel.saveIfChanged() }
     }
     
     

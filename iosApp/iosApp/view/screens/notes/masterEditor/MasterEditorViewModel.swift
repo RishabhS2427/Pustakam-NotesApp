@@ -90,6 +90,8 @@ final class MasterEditorViewModel: ObservableObject {
         if dirtyContentIds.isEmpty {
             noteContents = note.contents
         }
+        // 🎧 the canvas plays through the SAME shared player as the note editor — it needs this note's media list
+        contentBridge.setSelectedNote(note: note)
         guard hydratedNoteId != note.id else {
             refreshMissingTexts()
             return

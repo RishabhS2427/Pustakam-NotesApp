@@ -53,6 +53,8 @@ import com.app.pustakam.feature.notes.domain.usecase.SaveCanvasViewportUseCase
 import com.app.pustakam.feature.notes.domain.usecase.CreateORUpdateNoteUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ReadNoteUseCase
 import com.app.pustakam.feature.notes.domain.usecase.UpdateSelectedMediaContentUseCase
+import com.app.pustakam.feature.notes.domain.usecase.SetSelectedNoteContentUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ClearSelectedNoteContentUseCase
 import com.app.pustakam.core.common.util.Result
 import com.app.pustakam.core.model.models.BaseResponse
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -92,6 +94,8 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     private val readNoteUseCase by inject<ReadNoteUseCase>()
     private val saveNoteUseCase by inject<CreateORUpdateNoteUseCase>()
     private val updateSelectedMediaContentUseCase by inject<UpdateSelectedMediaContentUseCase>()
+    private val setSelectedNoteContentUseCase by inject<SetSelectedNoteContentUseCase>()
+    private val clearSelectedNoteContentUseCase by inject<ClearSelectedNoteContentUseCase>()
     private val deleteNoteContentUseCase by inject<DeleteNoteContentUseCase>()
     private val observeNoteContents by inject<ObserveNoteContentsUseCase>()
 
@@ -606,6 +610,8 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
             NOTES_CODES.READ -> {
                 val note = result.data.data as? Note ?: return
                 _state.update { it.copy(note = note, error = null) }
+                // 🎧 the canvas plays through the SAME shared player as the note editor — it needs this note's media list
+                setSelectedNoteContentUseCase(note)
                 readCanvasOf(note)
                 consumePendingMediaPaths()
             }
@@ -649,5 +655,11 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         super.onFailure(taskCode, error)
         _state.update { it.copy(isLoading = false, error = error.displayMessage()) }
         runPendingOpen()
+    }
+
+    // 🎧 the player's list belongs to the screen that is open, exactly as in the note editor
+    override fun onCleared() {
+        super.onCleared()
+        clearSelectedNoteContentUseCase()
     }
 }

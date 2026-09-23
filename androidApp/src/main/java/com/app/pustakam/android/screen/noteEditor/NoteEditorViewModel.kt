@@ -20,6 +20,7 @@ import com.app.pustakam.android.screen.TaskCode
 import com.app.pustakam.android.screen.base.BaseViewModel
 import com.app.pustakam.android.screen.base.apiWithCollect
 import com.app.pustakam.feature.notes.domain.editor.EditorCapabilityReducer
+import com.app.pustakam.feature.notes.domain.editor.EditorCommands
 import com.app.pustakam.feature.notes.domain.editor.EditorCapabilityState
 import com.app.pustakam.feature.notes.domain.editor.EditorEffect
 import com.app.pustakam.feature.notes.domain.editor.EditorIntent
@@ -56,6 +57,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.core.component.inject
@@ -80,6 +83,9 @@ class NoteEditorViewModel : BaseViewModel() {
     val noteContentUiState: StateFlow<NoteContentUiState> = _noteContentUiState.asStateFlow()
     private val dirtyContentIds = mutableSetOf<String>()
     private var contentSyncJob: Job? = null
+    // ✍️ 23-Sep-2026 — a deleted row leaves no dirty id behind, so remember the note changed anyway
+    private var structureChanged = false
+    private var autoSaveJob: Job? = null
     private val _history = MutableStateFlow(NoteHistory())
     val history: StateFlow<NoteHistory> = _history.asStateFlow()
 
@@ -178,6 +184,7 @@ class NoteEditorViewModel : BaseViewModel() {
 
                 onEditorIntent(EditorIntent.ExternalContentsChanged(note.contents))
                 observeExternalContents(note.id)
+                startAutoSave()
                 setSelectedNoteContentUseCase(_noteContentUiState.value.note ?: note)
                 consumePendingMediaPaths()
             }
@@ -239,7 +246,29 @@ class NoteEditorViewModel : BaseViewModel() {
         }
     }
     /** Flush without touching NoteStatus, so leaving or backgrounding never triggers navigation. */
-    fun saveNow() = saveThenOpen { }
+    // ✍️ 23-Sep-2026 — pausing an UNTOUCHED note must not re-stamp it: that push overwrote the other device's newer copy
+    fun saveNow() {
+        if (hasPendingChanges()) saveThenOpen { }
+    }
+
+    // ✍️ 23-Sep-2026 — an edit reaches the disk (and the sync queue) within 5s, not only when the screen pauses
+    private fun startAutoSave() {
+        autoSaveJob?.cancel()
+        autoSaveJob = viewModelScope.launch {
+            while (isActive) {
+                delay(EditorCommands.autoSaveMillis())
+                if (hasPendingChanges()) saveThenOpen { }
+            }
+        }
+    }
+
+    // ✍️ what the disk has not seen yet: an edited row, a deleted one, or a retitled note
+    private fun hasPendingChanges(): Boolean {
+        val state = _noteContentUiState.value
+        val note = state.note ?: return false
+        return structureChanged || dirtyContentIds.isNotEmpty() ||
+            state.titleTextState.value != note.title.orEmpty()
+    }
 
     fun saveThenOpen(onSaved: () -> Unit) {
         if(!isNoteValid()) return
@@ -255,6 +284,7 @@ class NoteEditorViewModel : BaseViewModel() {
             },
             onSuccess = {
                 dirtyContentIds.removeAll(dirty)
+                structureChanged = false
                 withContext(Dispatchers.Main) { onSaved() }
             }
         )
@@ -530,6 +560,7 @@ class NoteEditorViewModel : BaseViewModel() {
  * */
     fun removeContent(value: String) {
         recordHistory(NoteEditKind.DELETE_CONTENT)
+        structureChanged = true   // ✍️ the row is gone; nothing dirty is left to prove the note changed
         dirtyContentIds.remove(value)   // 🔧 15-Jul-2026 Phase 0.4: deleted → nothing to save
         val find = _noteContentUiState.value.note?.contents?.find { value == it.id }
         viewModelScope.launch(Dispatchers.IO) {

@@ -6,6 +6,11 @@ import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 
 object EditorCommands {
 
+    // ✍️ 23-Sep-2026 — how long an edit may live only in memory; both platforms tick on this one number
+    private const val AUTO_SAVE_MILLIS = 5_000L
+
+    fun autoSaveMillis(): Long = AUTO_SAVE_MILLIS
+
     fun emptyState(): EditorState = EditorState()
 
     fun stateOf(
