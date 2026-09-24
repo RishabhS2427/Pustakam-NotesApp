@@ -83,12 +83,14 @@ data class CanvasNode(
 
         const val WIDGET_GAP = 8f
 
-        // 🧱 24-Sep-2026 — a picture, a video or a document is a compact 3:2 landscape card
-        const val CARD_WIDTH = 240f
+        // 🖼️ 25-Sep-2026 — a picture, a video or a document is a vertical 2:3 card
+        const val CARD_WIDTH = 260f
 
-        const val CARD_HEIGHT = 160f
+        const val CARD_HEIGHT = 390f
 
-        // 🧱 24-Sep-2026 — a link or a place is a short card of the same width
+        // 🧱 24-Sep-2026 — a link or a place is its own short, wide card — its width does not follow CARD_WIDTH
+        const val SHORT_CARD_WIDTH = 240f
+
         const val SHORT_CARD_HEIGHT = 120f
 
         /** Where a measured widget starts before the device reports its true height. */
@@ -109,7 +111,11 @@ data class CanvasNode(
         // 🧱 24-Sep-2026 — cards stay compact on any paper; text, audio, tables and drawings take the paper's width
         fun widgetWidthFor(kind: ContentType, paperWidth: Float): Float {
             val full = widgetWidthOn(paperWidth)
-            return if (isCardKind(kind) || isShortCardKind(kind)) minOf(CARD_WIDTH, full) else full
+            return when {
+                isCardKind(kind) -> minOf(CARD_WIDTH, full)
+                isShortCardKind(kind) -> minOf(SHORT_CARD_WIDTH, full)
+                else -> full
+            }
         }
 
         /** A new widget's height. Fixed from then on, except for measured kinds. */

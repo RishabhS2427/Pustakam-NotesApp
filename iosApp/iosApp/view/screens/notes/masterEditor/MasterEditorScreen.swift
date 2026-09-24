@@ -94,7 +94,8 @@ struct MasterEditorScreen: View {
             onMeasured: { nodeId, height in
                 viewModel.onWidgetMeasured(nodeId: nodeId, height: height)
             },
-            keyboardInset: keyboardHeight
+            keyboardInset: keyboardHeight,
+            coverTitle: viewModel.note?.title
         ) { node, isEditing in
             nodeBody(node: node, isEditing: isEditing)
         }

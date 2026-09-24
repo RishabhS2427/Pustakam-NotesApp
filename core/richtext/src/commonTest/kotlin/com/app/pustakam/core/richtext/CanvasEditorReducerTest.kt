@@ -364,7 +364,7 @@ class CanvasEditorReducerTest {
     }
 
     @Test
-    fun picturesVideosAndDocumentsAreCompactLandscapeCards() {
+    fun picturesVideosAndDocumentsAreVerticalCards() {
         val state = board(page("p1", 0f, 0.0))
         val paper = state.node("p1")
         listOf(ContentType.IMAGE, ContentType.GIF, ContentType.VIDEO, ContentType.PDF, ContentType.DOCX)
@@ -372,8 +372,11 @@ class CanvasEditorReducerTest {
                 val node = CanvasCommands.widgetIn(state, paper, kind, "c")
                 assertEquals(CanvasNode.CARD_WIDTH, node.rect.width, "$kind width")
                 assertEquals(CanvasNode.CARD_HEIGHT, node.rect.height, "$kind height")
-                assertTrue(node.rect.width > node.rect.height, "$kind is a landscape rectangle")
+                assertTrue(node.rect.width < node.rect.height, "$kind is a vertical rectangle")
             }
+        val link = CanvasCommands.widgetIn(state, paper, ContentType.LINK, "l")
+        assertEquals(CanvasNode.SHORT_CARD_WIDTH, link.rect.width, "a link keeps its own, narrower width")
+        assertEquals(CanvasNode.SHORT_CARD_HEIGHT, link.rect.height)
         val audio = CanvasCommands.widgetIn(state, paper, ContentType.AUDIO, "a")
         assertEquals(360f - CanvasNode.PAGE_PADDING * 2f, audio.rect.width)
         assertTrue(audio.isMeasured, "an audio card is as tall as its player, never as tall as a zoom makes it")
@@ -645,5 +648,29 @@ class CanvasEditorReducerTest {
         val document = CanvasDocument(listOf(page("p1", 0f, 0.0), page("p2", 408f, 1.0)))
         assertEquals("p2", document.mostVisiblePage(CanvasRect(300f, 0f, 400f, 600f))?.id)
         assertNull(document.mostVisiblePage(CanvasRect(5000f, 0f, 100f, 100f)))
+    }
+
+    // ---- 25-Sep-2026: the title as a hard-cover page ----
+
+    @Test
+    fun theCoverSitsImmediatelyLeftOfTheFirstPageAtItsSize() {
+        val state = board(page("p1", 200f, 0.0), page("p2", 600f, 1.0))
+        val first = state.node("p1")
+        val cover = CanvasCommands.coverPageRect(state)
+        assertEquals(first.rect.width, cover.width)
+        assertEquals(first.rect.height, cover.height)
+        assertEquals(first.rect.y, cover.y)
+        assertEquals(first.rect.x - CanvasNode.DEFAULT_GAP - first.rect.width, cover.x)
+        assertEquals(cover, CanvasCommands.coverScreenRectOf(state), "the default board has no pan or zoom")
+    }
+
+    @Test
+    fun theCoverFallsBackToTheFittedScreenBeforeAnyPageExists() {
+        val state = board()
+        val cover = CanvasCommands.coverPageRect(state)
+        assertEquals(0f, cover.x)
+        assertEquals(0f, cover.y)
+        assertEquals(CanvasCommands.fittedPageWidth(state), cover.width)
+        assertEquals(CanvasCommands.fittedPageHeight(state), cover.height)
     }
 }

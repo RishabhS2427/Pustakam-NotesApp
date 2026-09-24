@@ -845,6 +845,35 @@ object CanvasCommands {
         (state.viewport.heightPx - PAGE_SCREEN_MARGIN * 2f)
             .takeIf { it > CanvasNode.MIN_SIZE } ?: CanvasNode.DEFAULT_TEXT_HEIGHT
 
+    /**
+     * 📕 25-Sep-2026 — where a note's title sits as a hard-cover page: paper the same size as
+     * the first real page, immediately to its left — the same way [pageNode] places a new page
+     * immediately to the right of the last one. Never a stored node: the note's title is the
+     * only copy of this text, so there is nothing here to keep in sync or send over the wire.
+     */
+    fun coverPageRect(state: CanvasEditorState): CanvasRect {
+        val first = state.document.pages.firstOrNull()
+            ?: return CanvasRect(0f, 0f, fittedPageWidth(state), fittedPageHeight(state))
+        return CanvasRect(
+            x = first.rect.x - CanvasNode.DEFAULT_GAP - first.rect.width,
+            y = first.rect.y,
+            width = first.rect.width,
+            height = first.rect.height
+        )
+    }
+
+    /** [coverPageRect], translated to the screen exactly like [screenRectOf] does for a real page. */
+    fun coverScreenRectOf(state: CanvasEditorState): CanvasRect {
+        val rect = coverPageRect(state)
+        val viewport = state.viewport
+        return CanvasRect(
+            x = viewport.toScreenX(rect.x),
+            y = viewport.toScreenY(rect.y),
+            width = rect.width * viewport.scale,
+            height = rect.height * viewport.scale
+        )
+    }
+
     /** The page a freshly opened canvas shows: the last one. */
     fun lastPageId(state: CanvasEditorState): String? = state.document.pages.lastOrNull()?.id
 

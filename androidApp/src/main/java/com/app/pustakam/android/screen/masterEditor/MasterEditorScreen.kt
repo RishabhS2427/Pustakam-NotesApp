@@ -156,7 +156,8 @@ fun MasterEditorScreen(
             onIntent = viewModel::onCanvasIntent,
             onRename = viewModel::renameNode,
             onMeasured = viewModel::onWidgetMeasured,
-            keyboardInsetPx = imeHeightPx
+            keyboardInsetPx = imeHeightPx,
+            coverTitle = uiState.note?.title
         ) { node, isEditing ->
             val nodeContent = uiState.note?.contents?.firstOrNull { it.id == node.contentId }
             MasterNodeContent(

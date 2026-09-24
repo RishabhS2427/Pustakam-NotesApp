@@ -23,7 +23,7 @@ struct NoteTextEditor: View {
     @State private var selectedRange: NSRange?
     var placeholder: String = ""
     @State var leftpadding: CGFloat = 10
-    @State var fontSize: CGFloat = 16
+    @State var fontSize: CGFloat = 28
     @State var isRulledEnabled: Bool = false
     @State var selection : TextSelection?
     @State private var toolbarRect: CGRect?

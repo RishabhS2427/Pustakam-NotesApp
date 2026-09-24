@@ -55,6 +55,8 @@ struct MasterCanvas<NodeContent: View>: View {
     var onRename: (String, String) -> Void = { _, _ in }
     var onMeasured: (String, CGFloat) -> Void = { _, _ in }
     var keyboardInset: CGFloat = 0
+    // 📕 25-Sep-2026 — the note's title, drawn as a hard-cover page; nil or blank draws nothing
+    var coverTitle: String? = nil
     @ViewBuilder let nodeContent: (CanvasNode, Bool) -> NodeContent
 
     @Environment(\.colorScheme) private var scheme
@@ -90,6 +92,11 @@ struct MasterCanvas<NodeContent: View>: View {
                 .onTapGesture(count: 2) { location in doubleTap(at: location) }
                 .onTapGesture { location in singleTap(at: location) }
 
+            // 📕 25-Sep-2026 — never a stored node: the note's title is the only copy of this text
+            if let coverTitle, !coverTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                coverLayer(title: coverTitle)
+            }
+
             ForEach(placements()) { placement in
                 pageLayer(placement)
             }
@@ -104,6 +111,23 @@ struct MasterCanvas<NodeContent: View>: View {
         .onChange(of: size) { _, updated in reportSize(updated) }
         // 🧱 24-Sep-2026 — while a widget is carried near a page's edge, that page scrolls the way the finger is going
         .task(id: lifted != nil) { await autoScrollWhileCarrying() }
+    }
+
+    /// 📕 25-Sep-2026 — the note's title as a hard cover: centered, no name bar, nothing can be dropped on it.
+    private func coverLayer(title: String) -> some View {
+        let rect = commands.coverScreenRectOf(state: state).cgRect
+        return Text(title)
+            .font(.system(size: 22, weight: .bold))
+            .multilineTextAlignment(.center)
+            .lineLimit(6)
+            .foregroundColor(palette.onAccent)
+            .padding(24)
+            .frame(width: rect.width, height: rect.height)
+            .background(palette.accent)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.divider, lineWidth: 1))
+            .offset(x: rect.minX, y: rect.minY)
+            .allowsHitTesting(false)
     }
 
     private func placements() -> [MasterPagePlacement] {

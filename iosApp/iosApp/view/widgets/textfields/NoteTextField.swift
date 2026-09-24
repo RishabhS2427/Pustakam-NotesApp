@@ -4,7 +4,7 @@ import UIKit
 struct NoteTextField: UIViewRepresentable {
 
     // MARK: - Configuration
-    var fontSize: CGFloat = 16
+    var fontSize: CGFloat = 28
 
     // MARK: - Bindings
     @Binding var attributedText: NSAttributedString

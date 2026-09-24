@@ -57,12 +57,16 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.app.pustakam.android.widgets.smartText.SmartTextTokens
 import com.app.pustakam.core.richtext.master.model.CanvasNode
+import com.app.pustakam.core.richtext.master.model.CanvasRect
 import com.app.pustakam.core.richtext.master.presentation.CanvasCommands
 import com.app.pustakam.core.richtext.master.presentation.CanvasEditorIntent
 import com.app.pustakam.core.richtext.master.presentation.CanvasEditorState
@@ -116,6 +120,8 @@ fun MasterCanvas(
     onRename: (String, String) -> Unit = { _, _ -> },
     onMeasured: (String, Float) -> Unit = { _, _ -> },
     keyboardInsetPx: Float = 0f,
+    // 📕 25-Sep-2026 — the note's title, drawn as a hard-cover page; null or blank draws nothing
+    coverTitle: String? = null,
     nodeContent: @Composable (CanvasNode, Boolean) -> Unit
 ) {
     val colors = SmartTextTokens.colors
@@ -248,6 +254,10 @@ fun MasterCanvas(
                 )
             }
     ) {
+        // 📕 25-Sep-2026 — never a stored node: the note's title is the only copy of this text
+        if (!coverTitle.isNullOrBlank()) {
+            MasterCoverPage(title = coverTitle, rect = CanvasCommands.coverScreenRectOf(state), pxPerDp = pxPerDp)
+        }
         // keyed by id: without this, a z-order change reorders the children and Compose
         // rebuilds the subtree, dropping focus out of whichever field was being typed in
         state.visibleNodes.forEach { page ->
@@ -269,6 +279,38 @@ fun MasterCanvas(
         lifted?.let { carried ->
             LiftedWidgetLayer(carried = carried, scale = viewport.scale, nodeContent = nodeContent)
         }
+    }
+}
+
+/** 📕 25-Sep-2026 — the note's title, drawn like a hard cover: centered, no name bar, nothing can be dropped on it. */
+@Composable
+private fun BoxScope.MasterCoverPage(title: String, rect: CanvasRect, pxPerDp: Float) {
+    val colors = SmartTextTokens.colors
+    Box(
+        modifier = Modifier
+            .graphicsLayer {
+                translationX = rect.x * pxPerDp
+                translationY = rect.y * pxPerDp
+            }
+            .wrapContentSize(Alignment.TopStart, unbounded = true)
+            .size(width = rect.width.dp, height = rect.height.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.accent)
+            .border(1.dp, colors.divider, RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = title,
+            style = TextStyle(
+                color = colors.onAccent,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            ),
+            maxLines = 6,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(24.dp)
+        )
     }
 }
 
