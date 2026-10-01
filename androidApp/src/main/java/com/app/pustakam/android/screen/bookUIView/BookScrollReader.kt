@@ -25,6 +25,8 @@ fun BookScrollReader(
     pages: List<BookPage>,
     startPageIndex: Int,
     onPageChanged: (Int) -> Unit,
+    pageOverlay: @Composable (Int) -> Unit = {},
+    zoomEnabled: Boolean = true,
 ) {
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = startPageIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
@@ -36,13 +38,13 @@ fun BookScrollReader(
     }
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize().zoomable(),
+        modifier = Modifier.fillMaxSize().zoomable(zoomEnabled),
         contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         items(pages.size) { index ->
             Box(Modifier.fillMaxWidth().height(560.dp)) {
-                BookPageContent(page = pages[index])
+                AnnotatedBookPage(page = pages[index]) { pageOverlay(index) }
             }
         }
     }

@@ -13,6 +13,15 @@ final class MasterEditorViewModel: ObservableObject {
     @Published private(set) var capabilities = EditorCapabilityCommands.shared.empty()
     @Published var keyboardDismissToken: Int = 0
 
+    private(set) lazy var drawing = DrawingHost(
+        contents: { [weak self] in self?.noteContents ?? [] },
+        noteId: { [weak self] in self?.note?.id },
+        documentId: { nil },
+        onWrite: { [weak self] in self?.updateContent($0) }
+    )
+
+    private var drawingChanges = Set<AnyCancellable>()
+
     private let adapter: NotesBridgeAdapter
     private let canvasBridge: CanvasBridgeAdapter
     private let contentBridge = NoteContentBridge()
@@ -42,6 +51,7 @@ final class MasterEditorViewModel: ObservableObject {
         self.adapter = adapter
         self.canvasBridge = canvasBridge
         load(noteId: noteId)
+        observeDrawing()
     }
 
     deinit {
@@ -51,6 +61,15 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     func text(for nodeId: String) -> MasterTextState? { texts[nodeId] }
+
+    private func observeDrawing() {
+        drawing.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &drawingChanges)
+        $noteContents
+            .sink { [weak self] contents in self?.drawing.sync(contents) }
+            .store(in: &drawingChanges)
+    }
 
     func content(for node: CanvasNode) -> NoteContentModel? {
         guard let contentId = node.contentId else { return nil }
@@ -243,7 +262,7 @@ final class MasterEditorViewModel: ObservableObject {
     // 🔄 24-Sep-2026 — housekeeping, never a user edit: a content that arrived without a widget gets one
     private func adoptOrphanContents() {
         guard commands.pageForSpawn(state: canvas) != nil else { return }
-        for content in noteContents where canvas.document.nodeForContent(contentId: content.id) == nil {
+        for content in noteContents where !content.isOverlayDrawing() && canvas.document.nodeForContent(contentId: content.id) == nil {
             spawnWidgetNode(kind: content.type, contentId: content.id, housekeeping: true)
         }
     }
@@ -426,15 +445,19 @@ final class MasterEditorViewModel: ObservableObject {
             intent: intent,
             gestureStart: gestureStart
         )
-        if commands.gestureEnded(before: before, next: canvas) {
+        let ended = commands.gestureEnded(before: before, next: canvas)
+        if ended {
             gestureStart = nil
         }
+        let reduced = canvas
         persistCanvas(before: before, intent: intent, edited: edited)
         if let pending = pendingStored, canvas.viewport.widthPx > 0 {
             pendingStored = nil
             lay(noteId: pending.noteId, stored: pending.nodes)
         }
         adoptPendingRemote()
+        followDrawingEditing(before: before, next: reduced)
+        if ended { syncDrawingFrames(reduced) }
     }
 
     /// 📄 23-Sep-2026 — one rule for every intent: whatever the reduce changed is written, what
@@ -531,9 +554,66 @@ final class MasterEditorViewModel: ObservableObject {
             addTextBlock()
             return
         }
+        if kind == ContentType.drawing && content == nil {
+            addDrawingWidget()
+            return
+        }
         if let content { addContent(content) }
         spawnWidgetNode(kind: kind, contentId: content?.id)
         if kind == ContentType.text { refreshMissingTexts() }
+    }
+
+    func addDrawingWidget() {
+        guard let note else { return }
+        let page = commands.pageForSpawn(state: canvas) ?? addBarePage(housekeeping: false)
+        let notes = DrawNoteContents.shared
+        let draft = notes.create(
+            noteId: note.id,
+            position: Double(noteContents.count),
+            surface: DrawCommands.shared.widgetSurface(),
+            width: 0,
+            height: 0
+        )
+        let node = commands.widgetIn(state: canvas, page: page, kind: ContentType.drawing, contentId: draft.id)
+        addContent(notes.framed(content: draft, width: node.rect.width, height: node.rect.height))
+        onCanvasIntent(commands.addNode(node: node))
+        dispatchCanvas(commands.revealEnd(pageId: page.id), housekeeping: true)
+        onCanvasIntent(commands.setEditing(nodeId: node.id))
+    }
+
+    func toggleDrawingOverlay() {
+        if !drawing.isOverlayActive() { onCanvasIntent(commands.useSelectTool()) }
+        drawing.toggleOverlay()
+    }
+
+    func finishDrawing() {
+        if commands.editingDrawingId(state: canvas) != nil {
+            onCanvasIntent(commands.exitEditing())
+        } else {
+            drawing.stop()
+        }
+    }
+
+    private func followDrawingEditing(before: CanvasEditorState, next: CanvasEditorState) {
+        let editing = commands.editingDrawingId(state: next)
+        guard editing != commands.editingDrawingId(state: before) else { return }
+        let contentId = editing.flatMap { next.document.nodeById(nodeId: $0)?.contentId }
+        let content = contentId.flatMap { id in noteContents.first { $0.id == id } }
+        if let drawingContent = content as? NoteContentModel.Drawing {
+            drawing.open(drawingContent)
+        } else if !drawing.isOverlayActive() {
+            drawing.stop()
+        }
+    }
+
+    private func syncDrawingFrames(_ state: CanvasEditorState) {
+        let notes = DrawNoteContents.shared
+        for case let content as NoteContentModel.Drawing in noteContents {
+            guard let node = state.document.nodeForContent(contentId: content.id), node.isDrawingWidget else { continue }
+            if !notes.isFramed(content: content, width: node.rect.width, height: node.rect.height) {
+                updateContent(notes.framed(content: content, width: node.rect.width, height: node.rect.height))
+            }
+        }
     }
 
     // 📄 24-Sep-2026 — a new widget lands on the page the user is on, and that page scrolls to show it

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 
 struct NoteTextFieldWrapper : View {
@@ -24,14 +25,24 @@ struct NoteTextEditor: View {
     var placeholder: String = ""
     @State var leftpadding: CGFloat = 10
     @State var fontSize: CGFloat = 28
+    // 🔧 25-Sep-2026 — the note title passes .bold here; everything else keeps the old regular weight
+    @State var fontWeight: UIFont.Weight = .regular
     @State var isRulledEnabled: Bool = false
     @State var selection : TextSelection?
     @State private var toolbarRect: CGRect?
     @State private var showToolbar = false
-
     let lineColor = Color.gray.opacity(0.5)
     let marginColor = Color.red
     let lineSpacing: CGFloat = 28
+
+    // 🔧 25-Sep-2026 — bakes the font IN: an attributedText with none of its own drops whatever font the UITextView had, which is why fontSize/fontWeight above did nothing on their own
+    private func styled(_ value: String) -> NSAttributedString {
+        NSAttributedString(
+            string: value,
+            attributes: [.font: UIFont.systemFont(ofSize: fontSize, weight: fontWeight)]
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading){
             if isRulledEnabled {
@@ -61,11 +72,11 @@ struct NoteTextEditor: View {
               // 🔧 EDITOR-FIX: seed the initial value — onChange doesn't fire for it,
               //   so previously-saved text rendered as blank on reopen.
               .onAppear {
-                  if attText.string != text { attText = NSAttributedString(string: text) }
+                  if attText.string != text { attText = styled(text) }
               }
               .onChange(of: text){
                   // downward sync (equality guard prevents ping-pong with the upward sync)
-                  if attText.string != text { attText = NSAttributedString(string : text) }
+                  if attText.string != text { attText = styled(text) }
               }
               // 🔧 EDITOR-FIX: upward sync was MISSING entirely — typing updated attText
               //   (via textViewDidChange) but the $text binding (title, content text)

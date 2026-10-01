@@ -29,6 +29,42 @@ private final class PageScrollBook {
     var handledTokens: [String: Int32] = [:]
     // 🧱 24-Sep-2026 — how far each page still has to scroll for a widget carried near its edge
     var carryScroll: [String: CGSize] = [:]
+    var onScroll: () -> Void = {}
+}
+
+struct MasterPageFrame {
+    let pageId: String
+    let x: Float
+    let y: Float
+    let width: Float
+    let height: Float
+    let contentX: Float
+    let contentY: Float
+    let scale: Float
+}
+
+final class MasterBoardFrames {
+
+    var reader: () -> [MasterPageFrame] = { [] }
+
+    private(set) lazy var anchors = DrawingAnchors { [weak self] _ in
+        (self?.current() ?? []).map {
+            DrawCommands.shared.mappedAnchor(
+                id: $0.pageId,
+                x: $0.x,
+                y: $0.y,
+                width: $0.width,
+                height: $0.height,
+                originX: $0.contentX,
+                originY: $0.contentY,
+                scale: $0.scale
+            )
+        }
+    }
+
+    func current() -> [MasterPageFrame] { reader() }
+
+    func moved() { anchors.refresh() }
 }
 
 private struct MasterPagePlacement: Identifiable {
@@ -57,6 +93,7 @@ struct MasterCanvas<NodeContent: View>: View {
     var keyboardInset: CGFloat = 0
     // 📕 25-Sep-2026 — the note's title, drawn as a hard-cover page; nil or blank draws nothing
     var coverTitle: String? = nil
+    var frames: MasterBoardFrames? = nil
     @ViewBuilder let nodeContent: (CanvasNode, Bool) -> NodeContent
 
     @Environment(\.colorScheme) private var scheme
@@ -85,7 +122,8 @@ struct MasterCanvas<NodeContent: View>: View {
     }
 
     private func canvas(size: CGSize) -> some View {
-        ZStack(alignment: .topLeading) {
+        publishFrames()
+        return ZStack(alignment: .topLeading) {
             // background takes the canvas taps; paper and widgets answer their own
             palette.page
                 .contentShape(Rectangle())
@@ -111,6 +149,35 @@ struct MasterCanvas<NodeContent: View>: View {
         .onChange(of: size) { _, updated in reportSize(updated) }
         // 🧱 24-Sep-2026 — while a widget is carried near a page's edge, that page scrolls the way the finger is going
         .task(id: lifted != nil) { await autoScrollWhileCarrying() }
+    }
+
+    private func publishFrames() {
+        guard let frames else { return }
+        let live = state
+        let book = scrollBook
+        frames.reader = {
+            let scale = live.viewport.scale > 0 ? live.viewport.scale : 1
+            return live.visibleNodes.map { page in
+                let screen: CanvasRect = CanvasCommands.shared.screenRectOf(
+                    document: live.document,
+                    node: page,
+                    viewport: live.viewport
+                )
+                let offset: CGPoint = book.offsets[page.id] ?? .zero
+                return MasterPageFrame(
+                    pageId: page.id,
+                    x: screen.x,
+                    y: screen.y,
+                    width: screen.width,
+                    height: screen.height,
+                    contentX: screen.x - Float(offset.x),
+                    contentY: screen.y + Float(masterPageHeaderHeight) - Float(offset.y),
+                    scale: scale
+                )
+            }
+        }
+        book.onScroll = { [weak frames] in frames?.moved() }
+        frames.moved()
     }
 
     /// 📕 25-Sep-2026 — the note's title as a hard cover: centered, no name bar, nothing can be dropped on it.
@@ -177,6 +244,7 @@ struct MasterCanvas<NodeContent: View>: View {
             onLift: { widget, origin, finger in startLift(widget, origin: origin, finger: finger) },
             onLiftMove: { translation, finger in moveLift(translation: translation, finger: finger) },
             onLiftEnd: { completed in endLift(completed: completed) },
+            resizeHandle: { widget in resizeHandle(for: widget) },
             nodeContent: nodeContent
         )
         .overlay(alignment: .bottomTrailing) {
@@ -427,7 +495,7 @@ private struct ScaledWidget<Content: View>: View {
 /// One sheet of paper: a name bar, then a viewport that scrolls vertically AND horizontally over
 /// the page's content. Widgets keep their size and place on that content whatever the paper does
 /// — when the paper shrinks they are simply scrolled to — and nothing is drawn outside it.
-private struct MasterPageView<NodeContent: View>: View {
+private struct MasterPageView<NodeContent: View, Handle: View>: View {
 
     let page: CanvasNode
     let title: String
@@ -445,6 +513,7 @@ private struct MasterPageView<NodeContent: View>: View {
     let onLift: (CanvasNode, CGPoint, CGPoint) -> Bool
     let onLiftMove: (CGSize, CGPoint) -> Void
     let onLiftEnd: (Bool) -> Void
+    @ViewBuilder let resizeHandle: (CanvasNode) -> Handle
     @ViewBuilder let nodeContent: (CanvasNode, Bool) -> NodeContent
 
     @State private var position = ScrollPosition(edge: .top)
@@ -508,6 +577,7 @@ private struct MasterPageView<NodeContent: View>: View {
                 geometry.contentOffset
             } action: { _, offset in
                 scrollBook.offsets[page.id] = offset
+                scrollBook.onScroll()
             }
         }
         .frame(width: frame.width, height: frame.height)
@@ -566,7 +636,7 @@ private struct MasterPageView<NodeContent: View>: View {
             nodeContent(widget, isEditing)
         }
         .overlay {
-            if widget.isTextWidget && !isEditing {
+            if (widget.isTextWidget || widget.isDrawingWidget) && !isEditing {
                 // until it has the caret, a text widget is a block: tap starts editing it,
                 // long-press carries it — the text view underneath never sees either touch
                 Color.clear
@@ -580,10 +650,15 @@ private struct MasterPageView<NodeContent: View>: View {
                     )
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if commands.canResizeWidget(state: state, node: widget) {
+                resizeHandle(widget)
+            }
+        }
         // text is lifted through its shield above; every other widget lifts from here
         .simultaneousGesture(
             liftGesture(widget),
-            including: widget.isTextWidget ? .subviews : .all
+            including: widget.isTextWidget || widget.isDrawingWidget ? .subviews : .all
         )
         .opacity(widget.id == liftedId ? 0 : 1)
         .offset(x: CGFloat(widget.rect.x) * scale, y: CGFloat(widget.rect.y) * scale)

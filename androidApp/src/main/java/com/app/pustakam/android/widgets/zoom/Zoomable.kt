@@ -26,7 +26,7 @@ private const val MIN_ZOOM = 1f
 private const val MAX_ZOOM = 5f
 private const val DOUBLE_TAP_ZOOM = 2.5f
 
-fun Modifier.zoomable(): Modifier = composed {
+fun Modifier.zoomable(enabled: Boolean = true): Modifier = composed {
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
@@ -48,47 +48,54 @@ fun Modifier.zoomable(): Modifier = composed {
     }
 
     this
-        .pointerInput(Unit) {
-            boxWidth = size.width.toFloat(); boxHeight = size.height.toFloat()
-            // manual loop: intercept ONLY pinches or gestures made while zoomed —
-            // single-finger drags at 1x fall through to the page-flip pager
-            awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false)
-                while (true) {
-                    val event = awaitPointerEvent()
-                    val pressed = event.changes.count { it.pressed }
-                    if (pressed == 0) break
-                    val pinching = pressed > 1
-                    if (pinching || scale > MIN_ZOOM) {
-                        val zoomChange = event.calculateZoom()
-                        val pan = event.calculatePan()
-                        val centroid = event.calculateCentroid()
-                        if (zoomChange != 1f) {
-                            setScale(scale * zoomChange)
-                            // zoom toward the pinch centroid
-                            offsetX += (boxWidth / 2f + offsetX - centroid.x) * (zoomChange - 1f)
-                            offsetY += (boxHeight / 2f + offsetY - centroid.y) * (zoomChange - 1f)
-                            clamp()
+        .then(
+            if (!enabled) {
+                Modifier
+            } else {
+                Modifier
+                    .pointerInput(Unit) {
+                        boxWidth = size.width.toFloat(); boxHeight = size.height.toFloat()
+                        // manual loop: intercept ONLY pinches or gestures made while zoomed —
+                        // single-finger drags at 1x fall through to the page-flip pager
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val pressed = event.changes.count { it.pressed }
+                                if (pressed == 0) break
+                                val pinching = pressed > 1
+                                if (pinching || scale > MIN_ZOOM) {
+                                    val zoomChange = event.calculateZoom()
+                                    val pan = event.calculatePan()
+                                    val centroid = event.calculateCentroid()
+                                    if (zoomChange != 1f) {
+                                        setScale(scale * zoomChange)
+                                        // zoom toward the pinch centroid
+                                        offsetX += (boxWidth / 2f + offsetX - centroid.x) * (zoomChange - 1f)
+                                        offsetY += (boxHeight / 2f + offsetY - centroid.y) * (zoomChange - 1f)
+                                        clamp()
+                                    }
+                                    if (scale > MIN_ZOOM && (pan.x != 0f || pan.y != 0f)) {
+                                        offsetX += pan.x; offsetY += pan.y; clamp()
+                                    }
+                                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                }
+                            }
                         }
-                        if (scale > MIN_ZOOM && (pan.x != 0f || pan.y != 0f)) {
-                            offsetX += pan.x; offsetY += pan.y; clamp()
-                        }
-                        event.changes.forEach { if (it.positionChanged()) it.consume() }
                     }
-                }
+                    .pointerInput(Unit) {
+                        detectTapGestures(onDoubleTap = { tap: Offset ->
+                            if (scale > MIN_ZOOM) setScale(MIN_ZOOM)
+                            else {
+                                setScale(DOUBLE_TAP_ZOOM)
+                                offsetX = (boxWidth / 2f - tap.x) * (DOUBLE_TAP_ZOOM - 1f)
+                                offsetY = (boxHeight / 2f - tap.y) * (DOUBLE_TAP_ZOOM - 1f)
+                                clamp()
+                            }
+                        })
+                    }
             }
-        }
-        .pointerInput(Unit) {
-            detectTapGestures(onDoubleTap = { tap: Offset ->
-                if (scale > MIN_ZOOM) setScale(MIN_ZOOM)
-                else {
-                    setScale(DOUBLE_TAP_ZOOM)
-                    offsetX = (boxWidth / 2f - tap.x) * (DOUBLE_TAP_ZOOM - 1f)
-                    offsetY = (boxHeight / 2f - tap.y) * (DOUBLE_TAP_ZOOM - 1f)
-                    clamp()
-                }
-            })
-        }
+        )
         .graphicsLayer {
             scaleX = scale; scaleY = scale
             translationX = offsetX; translationY = offsetY

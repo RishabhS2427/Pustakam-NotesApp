@@ -154,6 +154,17 @@
 		CHA7E31E6858281D8D21105C /* ChatFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = CHA7934B7B179B1059A115CF /* ChatFormatting.swift */; };
 		CHA7FD86D538EDD5BB2E7F72 /* ChatConversationRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CHA79486903217B145B54459 /* ChatConversationRowView.swift */; };
 		F5714A67668130981750B276 /* ProfileViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69C00AB44392C4019E645116 /* ProfileViewModel.swift */; };
+		D7A0C0DE0000000000000101 /* DrawingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000100 /* DrawingSession.swift */; };
+		D7A0C0DE0000000000000103 /* DrawingHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000102 /* DrawingHost.swift */; };
+		D7A0C0DE0000000000000105 /* DrawingRender.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000104 /* DrawingRender.swift */; };
+		D7A0C0DE0000000000000107 /* DrawingCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000106 /* DrawingCanvas.swift */; };
+		D7A0C0DE0000000000000109 /* DrawingFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000108 /* DrawingFrame.swift */; };
+		D7A0C0DE000000000000010B /* DrawingIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE000000000000010A /* DrawingIcons.swift */; };
+		D7A0C0DE000000000000010D /* DrawingToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE000000000000010C /* DrawingToolbar.swift */; };
+		D7A0C0DE000000000000010F /* DrawingPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE000000000000010E /* DrawingPanels.swift */; };
+		D7A0C0DE0000000000000111 /* NoteDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000110 /* NoteDrawing.swift */; };
+		D7A0C0DE0000000000000113 /* BookReaderAnnotations.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000112 /* BookReaderAnnotations.swift */; };
+		D7A0C0DE0000000000000115 /* DrawingBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000114 /* DrawingBlockView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -339,6 +350,17 @@
 		E7555D355DB041B79F274266 /* SmartTextToolbars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartTextToolbars.swift; sourceTree = "<group>"; };
 		F5A6249BEECE480894E43F9D /* SmartTextSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartTextSheets.swift; sourceTree = "<group>"; };
 		FEAD1FB8676E463C87126315 /* SmartTextTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartTextTokens.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000100 /* DrawingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSession.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000102 /* DrawingHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingHost.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000104 /* DrawingRender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingRender.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000106 /* DrawingCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingCanvas.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000108 /* DrawingFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingFrame.swift; sourceTree = "<group>"; };
+		D7A0C0DE000000000000010A /* DrawingIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingIcons.swift; sourceTree = "<group>"; };
+		D7A0C0DE000000000000010C /* DrawingToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingToolbar.swift; sourceTree = "<group>"; };
+		D7A0C0DE000000000000010E /* DrawingPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingPanels.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000110 /* NoteDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteDrawing.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000112 /* BookReaderAnnotations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookReaderAnnotations.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000114 /* DrawingBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingBlockView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -392,6 +414,7 @@
 				0000000022B2CB1000000104 /* DocumentPageBlockView.swift */,
 				0000000022B2CB1000000019 /* LinkBlockView.swift */,
 				0000000022B2CB100000001B /* LocationBlockView.swift */,
+				D7A0C0DE0000000000000114 /* DrawingBlockView.swift */,
 			);
 			path = blocks;
 			sourceTree = "<group>";
@@ -482,6 +505,7 @@
 			isa = PBXGroup;
 			children = (
 				22B2CA5D30119961002AD701 /* BookReaderView.swift */,
+				D7A0C0DE0000000000000112 /* BookReaderAnnotations.swift */,
 				0000000022B2CB1000000001 /* ReaderBlockView.swift */,
 				0000000022B2CB1000000102 /* InlineDocuments.swift */,
 				0000000022B2CB1000000003 /* ReaderPageView.swift */,
@@ -515,6 +539,7 @@
 			children = (
 				22B2CA6330119961002AD701 /* NoteEditorView.swift */,
 				22B2CA6430119961002AD701 /* NoteEditorViewModel.swift */,
+				D7A0C0DE0000000000000110 /* NoteDrawing.swift */,
 			);
 			path = noteEditor;
 			sourceTree = "<group>";
@@ -886,6 +911,7 @@
 				63D0891F2CAC85B4008FD8CC /* textfields */,
 				8B023D68CAFE421A86322695 /* smartText */,
 				22D196BC30283E37000CF5F1 /* masterEditor */,
+				D7A0C0DE0000000000000116 /* drawing */,
 			);
 			path = widgets;
 			sourceTree = "<group>";
@@ -1033,6 +1059,21 @@
 				226FFEFA8B10B38EE4559E41 /* UsernameSheetView.swift */,
 			);
 			path = profile;
+			sourceTree = "<group>";
+		};
+		D7A0C0DE0000000000000116 /* drawing */ = {
+			isa = PBXGroup;
+			children = (
+				D7A0C0DE0000000000000100 /* DrawingSession.swift */,
+				D7A0C0DE0000000000000102 /* DrawingHost.swift */,
+				D7A0C0DE0000000000000104 /* DrawingRender.swift */,
+				D7A0C0DE0000000000000106 /* DrawingCanvas.swift */,
+				D7A0C0DE0000000000000108 /* DrawingFrame.swift */,
+				D7A0C0DE000000000000010A /* DrawingIcons.swift */,
+				D7A0C0DE000000000000010C /* DrawingToolbar.swift */,
+				D7A0C0DE000000000000010E /* DrawingPanels.swift */,
+			);
+			path = drawing;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1338,6 +1379,17 @@
 				22B2CA8630119961002AD701 /* SearchBar.swift in Sources */,
 				7555FF83242A565900829871 /* ContentView.swift in Sources */,
 				63D2A6432E5C890B00FCF4A7 /* ColorSelector.swift in Sources */,
+				D7A0C0DE0000000000000101 /* DrawingSession.swift in Sources */,
+				D7A0C0DE0000000000000103 /* DrawingHost.swift in Sources */,
+				D7A0C0DE0000000000000105 /* DrawingRender.swift in Sources */,
+				D7A0C0DE0000000000000107 /* DrawingCanvas.swift in Sources */,
+				D7A0C0DE0000000000000109 /* DrawingFrame.swift in Sources */,
+				D7A0C0DE000000000000010B /* DrawingIcons.swift in Sources */,
+				D7A0C0DE000000000000010D /* DrawingToolbar.swift in Sources */,
+				D7A0C0DE000000000000010F /* DrawingPanels.swift in Sources */,
+				D7A0C0DE0000000000000111 /* NoteDrawing.swift in Sources */,
+				D7A0C0DE0000000000000113 /* BookReaderAnnotations.swift in Sources */,
+				D7A0C0DE0000000000000115 /* DrawingBlockView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

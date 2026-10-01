@@ -25,6 +25,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.app.pustakam.android.widgets.audio.AudioPlayerUIState
 import com.app.pustakam.android.widgets.document.InlineBookFileWidget
+import com.app.pustakam.android.widgets.drawing.DrawingCanvas
+import com.app.pustakam.android.widgets.drawing.DrawingSession
+import com.app.pustakam.android.widgets.drawing.drawingInput
 import com.app.pustakam.android.widgets.image.ImageCard
 import com.app.pustakam.android.widgets.masterEditor.MasterTextWidget
 import com.app.pustakam.android.widgets.smartText.SmartTextTokens
@@ -50,7 +53,8 @@ fun MasterNodeContent(
     onFocused: () -> Unit,
     onOpenMedia: () -> Unit,
     onDelete: () -> Unit = {},
-    keyboardInsetPx: Float = 0f
+    keyboardInsetPx: Float = 0f,
+    drawingSession: DrawingSession? = null
 ) {
     val colors = SmartTextTokens.colors
     when  {
@@ -180,6 +184,14 @@ fun MasterNodeContent(
                 )
             }
         }
+
+        content is NoteContentModel.Drawing && drawingSession != null -> DrawingCanvas(
+            session = drawingSession,
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (isEditing) Modifier.drawingInput(drawingSession) else Modifier),
+            zoom = scale
+        )
 
         // 🔄 24-Sep-2026 — a widget waiting for its content (it may still be on its way from the other device) draws nothing
         node.contentId != null -> Unit

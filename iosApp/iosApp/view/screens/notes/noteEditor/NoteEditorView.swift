@@ -15,6 +15,7 @@ struct NoteEditorView: View {
     // 🔧 20-Jul-2026: NEW FEATURE (export) — format chooser + spinner while generating
     @State private var showExportOptions = false
     @State private var isExporting = false
+    @State private var ink = NoteInkAnchors()
     // 🔧 V1 fix: @StateObject (was @ObservedObject + inline init → VM recreated on every
     //           re-render, wiping edits). Note passed via init — setNote() no longer exists.
     @StateObject private var noteEditorViewModel: NoteEditorViewModel
@@ -36,35 +37,50 @@ struct NoteEditorView: View {
                 NoteTextEditor(
                     text: $noteEditorViewModel.state.title,   // 🔧 title owned by VM → actually saved
                     placeholder: "Title : Keep your thoughts alive.",
-                    fontSize: 22
+                    fontSize: 30,   // 🔧 25-Sep-2026 — matches Android's title (typography.headlineLarge: 30sp Bold)
+                    fontWeight: .bold
                 ).frame(minHeight: 20, maxHeight:.infinity)
                     ForEach(noteEditorViewModel.state.noteContents){ noteContent in
                         renderWidget(content: noteContent){
                             updatedContent in
                             noteEditorViewModel.updateContent(content: updatedContent)
                         }
+                        .noteInkRow(noteContent.id)
                     }
                     // 🔧 07-Aug-2026 — room so the caret clears the keyboard accessory toolbar
                     Color.clear.frame(height: 80)
                 }
+                .background(DrawingScrollFinder { ink.attach($0) })
+                .onPreferenceChange(NoteInkRowKey.self) { ink.update($0) }
             }
             .scrollDismissesKeyboard(.interactively)
+            .coordinateSpace(name: NoteInkAnchors.space)
             .frame(maxHeight: .infinity, alignment: .top)
+            .overlay { overlayInk }
             if noteEditorViewModel.state.isLoading || isExporting {  // 🔧 spinner: VM state or export
                 LoadingUI().frame(alignment: .center)
                 Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
             }
-            OverlayEditorButtons(
-                showDelete: noteEditorViewModel.state.note != nil,  // 🔧 state.note — updates when async note arrives
-                onMediaCapture: { noteEditorViewModel.requestCapture(ContentType.image) },
-                onShare: { print("Share action") },
-                onRecordMic: { noteEditorViewModel.requestCapture(ContentType.audio) },
-                onAddTextField: { noteEditorViewModel.addNewText() },
-                onArrowButton: {},
-                onImportFile: { noteEditorViewModel.openImportSheet() }
-            )
-            .frame(alignment: .bottomTrailing)
-            .padding()
+            if noteEditorViewModel.drawing.target == nil {
+                OverlayEditorButtons(
+                    showDelete: noteEditorViewModel.state.note != nil,  // 🔧 state.note — updates when async note arrives
+                    onMediaCapture: { noteEditorViewModel.requestCapture(ContentType.image) },
+                    onShare: { print("Share action") },
+                    onRecordMic: { noteEditorViewModel.requestCapture(ContentType.audio) },
+                    onAddTextField: { noteEditorViewModel.addNewText() },
+                    onArrowButton: {},
+                    onImportFile: { noteEditorViewModel.openImportSheet() },
+                    onDrawing: {
+                        noteEditorViewModel.addDrawingPage(
+                            width: Float(UIScreen.main.bounds.width),
+                            height: Float(UIScreen.main.bounds.height)
+                        )
+                    }
+                )
+                .frame(alignment: .bottomTrailing)
+                .padding()
+            }
+            drawingChrome
         }
         .editorCapabilities(
             state: noteEditorViewModel.capabilities,
@@ -117,12 +133,20 @@ struct NoteEditorView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 BackButton(action: {
-                    dismiss()
+                    if noteEditorViewModel.drawing.target != nil {
+                        noteEditorViewModel.drawing.stop()
+                    } else {
+                        dismiss()
+                    }
                 })
             }
             
             ToolbarItem(placement: .topBarTrailing) {
                 HStack{
+                    ActionButtonWithoutBackground(iconName: DrawingIcons.draw,
+                                                  action: {
+                        noteEditorViewModel.drawing.toggleOverlay()
+                    }, tint: overlayActive ? Theme.Colors.primary : Theme.Colors.secondary)
                     ActionButtonWithoutBackground(iconName: "workspace",
                                                   action: {
                         if let noteId = noteEditorViewModel.state.note?.id {
@@ -188,7 +212,6 @@ struct NoteEditorView: View {
         switch content.type {
             case .text:
                 let textContent = content as! NoteContentModel.TextContent
-
                 MasterTextContentWidget(
                     text: textContent.text,
                     metadata: textContent.metadata,
@@ -248,12 +271,47 @@ struct NoteEditorView: View {
                     saveMediaToDevice(media: contentGif)
                 })
 
+            case .drawing:
+                if let drawing = content as? NoteContentModel.Drawing, !drawing.isOverlay() {
+                    NoteDrawingBlock(
+                        content: drawing,
+                        session: noteEditorViewModel.drawing.session(drawing),
+                        active: noteEditorViewModel.drawing.target == drawing.id,
+                        onActivate: { noteEditorViewModel.drawing.start(drawing.id) },
+                        onDelete: { askDeleteContent(contentId: drawing.id, kind: "Drawing") }
+                    )
+                }
+
             default : NoteTextFieldWrapper()
         }
 
     }
     
     
+    private var overlayActive: Bool { noteEditorViewModel.drawing.isOverlayActive() }
+
+    @ViewBuilder
+    private var overlayInk: some View {
+        if let overlay = noteEditorViewModel.drawing.overlay {
+            DrawingCanvas(
+                session: overlay,
+                anchors: ink.anchors,
+                navigator: overlayActive ? NoteListNavigator(ink: ink) : nil,
+                input: overlayActive
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var drawingChrome: some View {
+        if let session = noteEditorViewModel.drawing.active() {
+            DrawingChrome(session: session, onDone: { noteEditorViewModel.drawing.stop() })
+                .padding(.horizontal, 12)
+                .padding(.bottom, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
+    }
+
     func shareNote(){
             // share note link via different apps
     }

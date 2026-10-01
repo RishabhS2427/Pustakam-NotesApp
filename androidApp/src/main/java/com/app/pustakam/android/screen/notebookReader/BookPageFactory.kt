@@ -52,6 +52,8 @@ object BookPageFactory {
 
         is NoteContentModel.Location ->
             listOf(BookPage.LocationPage(content.latitude, content.longitude, content.address, content.id))
+
+        is NoteContentModel.Drawing -> emptyList()
     }
 
     // 🔧 19-Jul-2026: word-boundary pagination — same cut preference as TextBlockSplitter

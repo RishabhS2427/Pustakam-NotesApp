@@ -22,6 +22,7 @@ struct MasterEditorScreen: View {
     @State private var sheet: MasterTextSheet = .none
     @State private var keyboardHeight: CGFloat = 0
     @State private var autoFocused = false
+    @State private var boardFrames = MasterBoardFrames()
 
     private var palette: SmartTextPalette { SmartTextPalette.of(scheme) }
 
@@ -31,7 +32,7 @@ struct MasterEditorScreen: View {
         ZStack(alignment: .bottom) {
             canvas
             banner
-            zoomBar
+            bottomBar
             keyboardToolbar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -95,10 +96,12 @@ struct MasterEditorScreen: View {
                 viewModel.onWidgetMeasured(nodeId: nodeId, height: height)
             },
             keyboardInset: keyboardHeight,
-            coverTitle: viewModel.note?.title
+            coverTitle: viewModel.note?.title,
+            frames: boardFrames
         ) { node, isEditing in
             nodeBody(node: node, isEditing: isEditing)
         }
+        .overlay { boardInk }
         // without this SwiftUI lifts the whole canvas when the keyboard opens, which moves
         // the page off the screen it was fitted to
         .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -136,8 +139,27 @@ struct MasterEditorScreen: View {
             onFocused: { viewModel.onCanvasIntent(commands.setEditing(nodeId: nodeId)) },
             onOpenMedia: { onOpenMedia(node.contentId) },
             onDelete: { viewModel.deleteNode(nodeId: nodeId) },
-            keyboardInsetPx: keyboardHeight
+            keyboardInsetPx: keyboardHeight,
+            drawingSession: (viewModel.content(for: node) as? NoteContentModel.Drawing).map { viewModel.drawing.session($0) }
         )
+    }
+
+    @ViewBuilder
+    private var boardInk: some View {
+        if let overlay = viewModel.drawing.overlay {
+            DrawingCanvas(session: overlay, anchors: boardFrames.anchors, input: viewModel.drawing.isOverlayActive())
+        }
+    }
+
+    @ViewBuilder
+    private var bottomBar: some View {
+        if viewModel.drawing.target != nil, let session = viewModel.drawing.active() {
+            DrawingChrome(session: session, onDone: { viewModel.finishDrawing() })
+                .padding(.horizontal, 12)
+                .padding(.bottom, 28)
+        } else {
+            zoomBar
+        }
     }
 
     /// Shown only while the canvas has nothing to draw. Tells us which stage of
@@ -211,6 +233,9 @@ struct MasterEditorScreen: View {
                 viewModel.onCanvasIntent(commands.zoomToFit())
             }
             toolButtons
+            barButton(icon: DrawingIcons.draw, tint: palette.onSurface) {
+                viewModel.toggleDrawingOverlay()
+            }
             barButton(icon: "plus.square.on.square", tint: palette.accent) {
                 showAttach = true
             }
@@ -285,6 +310,7 @@ struct MasterNodeContent: View {
     var onOpenMedia: () -> Void = {}
     var onDelete: () -> Void = {}
     var keyboardInsetPx: CGFloat = 0
+    var drawingSession: DrawingSession? = nil
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
@@ -324,6 +350,8 @@ struct MasterNodeContent: View {
             linkBody
         } else if content is NoteContentModel.Location {
             locationBody
+        } else if content is NoteContentModel.Drawing, let drawingSession {
+            DrawingCanvas(session: drawingSession, input: isEditing, zoom: scale)
         } else if node.contentId != nil {
             // 🔄 24-Sep-2026 — a widget waiting for its content (it may still be on its way from the other device) draws nothing
             Color.clear

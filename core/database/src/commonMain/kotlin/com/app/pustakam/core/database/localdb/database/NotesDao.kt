@@ -251,6 +251,19 @@ class NotesDao : KoinComponent {
                                   updatedAt = row.contentUpdatedAt,
                               )
 
+                              ContentType.DRAWING -> NoteContentModel.Drawing(
+                                  id = row.contentId,
+                                  noteId = row.noteId,
+                                  position = row.position!!,
+                                  createdAt = row.contentCreatedAt,
+                                  updatedAt = row.contentUpdatedAt,
+                                  surface = row.drawingSurface ?: NoteContentModel.Drawing.SURFACE_WIDGET,
+                                  width = row.width?.toInt() ?: 0,
+                                  height = row.height?.toInt() ?: 0,
+                                  drawing = row.drawing.orEmpty(),
+                                  target = row.drawingTarget.orEmpty(),
+                              )
+
                               else -> null
                           }
                       } else null
@@ -292,6 +305,9 @@ class NotesDao : KoinComponent {
         var progressPage: Long = 0
         var assetId: String? = null
         var checksum: String? = null
+        var drawing: String? = null
+        var drawingSurface: String? = null
+        var drawingTarget: String? = null
         when (noteContent) {
             is NoteContentModel.TextContent -> {
                 text = noteContent.text
@@ -320,6 +336,13 @@ class NotesDao : KoinComponent {
             is NoteContentModel.Link -> {
                 url = noteContent.url
             }
+            is NoteContentModel.Drawing -> {
+                width = noteContent.width.toLong()
+                height = noteContent.height.toLong()
+                drawing = noteContent.drawing
+                drawingSurface = noteContent.surface
+                drawingTarget = noteContent.target
+            }
         }
       queries.insertNoteContentById(
             id = noteContent.id,
@@ -347,6 +370,9 @@ class NotesDao : KoinComponent {
             // 🖼️ 20-Aug-2026 sync: same reason — INSERT OR REPLACE would drop the server asset id
             assetId = assetId,
             checksum = checksum,
+            drawing = drawing,
+            drawingSurface = drawingSurface,
+            drawingTarget = drawingTarget,
         )
     }
 
@@ -412,7 +438,14 @@ class NotesDao : KoinComponent {
                 createdAt = createdAt, updatedAt = updatedAt,
             )
 
-            ContentType.DRAWING -> TODO()
+            ContentType.DRAWING -> NoteContentModel.Drawing(
+                id = id, noteId = noteId, position = position ?: 0.0,
+                createdAt = createdAt, updatedAt = updatedAt,
+                surface = drawingSurface ?: NoteContentModel.Drawing.SURFACE_WIDGET,
+                width = width?.toInt() ?: 0, height = height?.toInt() ?: 0,
+                drawing = drawing.orEmpty(),
+                target = drawingTarget.orEmpty(),
+            )
             ContentType.FORMULA -> TODO()
             ContentType.TABLE -> TODO()
         }
@@ -620,6 +653,19 @@ class NotesDao : KoinComponent {
                                 noteId = row.noteId,
                                 createdAt = row.contentCreatedAt,
                                 updatedAt = row.contentUpdatedAt,
+                            )
+
+                            type == ContentType.DRAWING -> NoteContentModel.Drawing(
+                                id = row.contentId,
+                                noteId = row.noteId,
+                                position = row.position!!,
+                                createdAt = row.contentCreatedAt,
+                                updatedAt = row.contentUpdatedAt,
+                                surface = row.drawingSurface ?: NoteContentModel.Drawing.SURFACE_WIDGET,
+                                width = row.width?.toInt() ?: 0,
+                                height = row.height?.toInt() ?: 0,
+                                drawing = row.drawing.orEmpty(),
+                                target = row.drawingTarget.orEmpty(),
                             )
 
                             else -> null

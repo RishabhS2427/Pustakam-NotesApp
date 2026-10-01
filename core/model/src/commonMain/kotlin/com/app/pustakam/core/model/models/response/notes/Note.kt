@@ -211,8 +211,53 @@ sealed class NoteContentModel {
         override val position: Double,
     ) : NoteContentModel()
 
+    @Serializable @SerialName("DRAWING")
+    data class Drawing(
+        override val updatedAt: String?,
+        override val createdAt: String?,
+        @SerialName("contentType")
+        override val type: ContentType = ContentType.DRAWING,
+        @SerialName("_id")
+        @JsonNames("id")
+        override val id: String,
+        override val noteId: String,
+        override val position: Double,
+        val surface: String = SURFACE_WIDGET,
+        val width: Int = 0,
+        val height: Int = 0,
+        val drawing: String = "",
+        val target: String = "",
+    ) : NoteContentModel() {
+        fun withDrawing(payload: String): Drawing =
+            copy(drawing = payload, updatedAt = "${getCurrentTimestamp()}")
+
+        fun withSize(newWidth: Int, newHeight: Int): Drawing =
+            copy(width = newWidth, height = newHeight, updatedAt = "${getCurrentTimestamp()}")
+
+        fun isOverlay(): Boolean = surface == SURFACE_OVERLAY
+
+        fun isPage(): Boolean = surface == SURFACE_PAGE
+
+        fun isWidget(): Boolean = surface == SURFACE_WIDGET
+
+        fun isAnnotation(): Boolean = target.isNotEmpty()
+
+        fun annotates(contentId: String): Boolean = isOverlay() && target == contentId
+
+        fun aspect(): Float = if (width > 0 && height > 0) height.toFloat() / width else DEFAULT_ASPECT
+
+        companion object {
+            const val SURFACE_OVERLAY = "OVERLAY"
+            const val SURFACE_PAGE = "PAGE"
+            const val SURFACE_WIDGET = "WIDGET"
+            const val DEFAULT_ASPECT = 1.414f
+        }
+    }
+
     fun isMediaFile() : Boolean = this is MediaContent
     fun isPlayableMedia(): Boolean = this.type.isPlayableMedia()
+    fun isDrawing(): Boolean = this is Drawing
+    fun isOverlayDrawing(): Boolean = this is Drawing && isOverlay()
 }
 // 🔧 15-Jul-2026 iOS MEDIA-LOST FIX: localPath goes through resolveLocalFilePath — on iOS the app
 //   container UUID changes on every update, so stored absolute paths are re-anchored onto the

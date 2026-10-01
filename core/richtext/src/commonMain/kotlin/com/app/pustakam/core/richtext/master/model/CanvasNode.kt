@@ -58,6 +58,8 @@ data class CanvasNode(
 
     val isTextWidget: Boolean get() = role == CanvasRole.WIDGET && kind == TEXT
 
+    val isDrawingWidget: Boolean get() = role == CanvasRole.WIDGET && kind == DRAWING
+
     // 🧱 24-Sep-2026 — text and audio: the height is the content's own, measured on the device, never user-sized
     val isMeasured: Boolean get() = role == CanvasRole.WIDGET && isMeasuredKind(kind)
 

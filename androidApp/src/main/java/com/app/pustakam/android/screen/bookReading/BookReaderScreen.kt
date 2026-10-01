@@ -1,14 +1,17 @@
 package com.app.pustakam.android.screen.bookReading
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,7 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.app.pustakam.android.screen.bookUIView.BookPageContent
+import com.app.pustakam.android.screen.bookUIView.AnnotatedBookPage
 import com.app.pustakam.android.screen.bookUIView.BookScrollReader
 import com.app.pustakam.android.screen.notebookReader.BookPager
 
@@ -35,6 +38,10 @@ import com.app.pustakam.android.theme.PaperColor
 import com.app.pustakam.android.theme.typography
 import com.app.pustakam.android.widgets.LoadingUI
 import com.app.pustakam.android.widgets.SnackBarUi
+import com.app.pustakam.android.widgets.drawing.DrawingChrome
+import com.app.pustakam.android.widgets.drawing.DrawingPageLayer
+import com.app.pustakam.android.widgets.drawing.rememberCapturesTouches
+import com.app.pustakam.core.drawing.note.DrawNoteContents
 
 @Composable
 fun BookReaderScreen(
@@ -44,6 +51,12 @@ fun BookReaderScreen(
     onBack: () -> Unit = {},
 ) {
     val state by viewModel.bookUiState.collectAsStateWithLifecycle()
+    val drawingTarget by viewModel.drawing.target.collectAsStateWithLifecycle()
+    val annotation = viewModel.drawing.overlay.collectAsStateWithLifecycle().value
+    val annotating = drawingTarget != null && drawingTarget == viewModel.drawing.overlayId()
+    val inkCaptures = rememberCapturesTouches(annotation)
+    val zoomEnabled = !(annotating && inkCaptures)
+    BackHandler(enabled = annotating) { viewModel.drawing.stop() }
 
     LaunchedEffect(bookId) { viewModel.onHandleIntent(BookReaderIntent.LoadBook(bookId)) }
 
@@ -58,6 +71,16 @@ fun BookReaderScreen(
             state.pages.isNotEmpty() -> {
                 var pageIndex by remember { mutableIntStateOf(state.pageProgress) }
                 val doc = state.doc
+                val pageInk: @Composable (Int) -> Unit = { index ->
+                    if (annotation != null && doc != null) {
+                        DrawingPageLayer(
+                            session = annotation,
+                            anchorId = DrawNoteContents.pageAnchorId(doc.id, index),
+                            active = annotating,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
                 when (state.readingMode) {
                     ReadingMode.PAGE ->
                         BookPager(
@@ -67,7 +90,8 @@ fun BookReaderScreen(
                                 pageIndex = index
                                 doc?.let { viewModel.onHandleIntent(BookReaderIntent.PageChanged(it, index)) }
                             },
-                        ) { index -> BookPageContent(page = state.pages[index]) }
+                            zoomEnabled = zoomEnabled,
+                        ) { index -> AnnotatedBookPage(page = state.pages[index]) { pageInk(index) } }
 
                     ReadingMode.SCROLL ->
                         BookScrollReader(
@@ -77,10 +101,12 @@ fun BookReaderScreen(
                                 pageIndex = index
                                 doc?.let { viewModel.onHandleIntent(BookReaderIntent.PageChanged(it, index)) }
                             },
+                            pageOverlay = pageInk,
+                            zoomEnabled = zoomEnabled,
                         )
                 }
                 // page counter chip
-                Text(
+                if (!annotating) Text(
                     "${pageIndex + 1} / ${state.pages.size}",
                     style = typography.labelMedium, color = PaperColor,
                     modifier = Modifier
@@ -96,6 +122,16 @@ fun BookReaderScreen(
         }
         if (state.pages.isNotEmpty()) {
             IconButton(
+                onClick = { viewModel.drawing.toggleOverlay() },
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 54.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = "Write on document",
+                    tint = if (annotating) colorScheme.primary else colorScheme.secondary
+                )
+            }
+            IconButton(
                 onClick = {
                     viewModel.onHandleIntent(BookReaderIntent.ToggleReadingMode(state.readingMode.toggled()))
                 },
@@ -109,6 +145,17 @@ fun BookReaderScreen(
                     tint = colorScheme.secondary
                 )
             }
+        }
+        val inkSession = viewModel.drawing.active()
+        if (annotating && inkSession != null) {
+            DrawingChrome(
+                session = inkSession,
+                onDone = viewModel.drawing::stop,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 16.dp)
+            )
         }
     }
 }

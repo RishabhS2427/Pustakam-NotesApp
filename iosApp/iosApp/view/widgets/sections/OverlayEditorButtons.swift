@@ -17,6 +17,7 @@ struct OverlayEditorButtons : View {
     var onAddTextField : () -> Void = {}
     var onArrowButton: () -> Void = {}
     var onImportFile: () -> Void = {}   // 🔧 18-Jul-2026: NEW — opens the import options (device/link)
+    var onDrawing: () -> Void = {}
     var body: some View {
         VStack(alignment: .center) {
               if showArrow {
@@ -41,6 +42,11 @@ struct OverlayEditorButtons : View {
                       ActionButton(iconName: "paperclip", action: {
                           onArrowButton()
                           onImportFile()
+                          showArrow.toggle()
+                      })
+                      ActionButton(iconName: "paintbrush.pointed", action: {
+                          onArrowButton()
+                          onDrawing()
                           showArrow.toggle()
                       })
                       ActionButton(iconName: "square.and.arrow.up", action: {

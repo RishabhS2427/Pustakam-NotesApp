@@ -282,6 +282,13 @@ object CanvasEditorReducer {
         return fittedToScreen(editing.copy(selectedNodeId = page.id), page)
     }
 
+    private fun editingDrawing(state: CanvasEditorState, widget: CanvasNode): CanvasEditorState = state.copy(
+        editingNodeId = widget.id,
+        draggingNodeId = null,
+        resizingNodeId = null,
+        selectedNodeId = state.document.pageOf(widget.id)?.id ?: state.selectedNodeId
+    )
+
     /** The keyboard going away: back to the view the writer had before editing began. */
     private fun leftEditing(state: CanvasEditorState): CanvasEditorState = state.copy(
         editingNodeId = null,
@@ -463,6 +470,7 @@ object CanvasEditorReducer {
                     node == null -> state.copy(selectedNodeId = null, editingNodeId = null)
                     node.isPage -> focusedPage(state, node)
                     node.isTextWidget -> editingText(state, node)
+                    node.isDrawingWidget -> editingDrawing(state, node)
                     else -> state.copy(
                         selectedNodeId = state.document.pageOf(node.id)?.id ?: state.selectedNodeId
                     )
@@ -604,6 +612,7 @@ object CanvasEditorReducer {
                     node == null -> leftEditing(state)
                     node.isPage -> focusedPage(state, node)
                     node.isTextWidget -> editingText(state, node)
+                    node.isDrawingWidget -> editingDrawing(state, node)
                     else -> state
                 }
             }
@@ -749,6 +758,14 @@ object CanvasCommands {
 
     fun isEditing(state: CanvasEditorState): Boolean =
         state.gesture == CanvasGesture.EDITING
+
+    fun isDrawingWidget(node: CanvasNode): Boolean = node.isDrawingWidget
+
+    fun editingDrawingId(state: CanvasEditorState): String? =
+        state.editingNodeId?.takeIf { state.document.nodeById(it)?.isDrawingWidget == true }
+
+    fun canResizeWidget(state: CanvasEditorState, node: CanvasNode): Boolean =
+        node.isDrawingWidget && !node.locked && state.permits.canResizeNode && state.editingNodeId != node.id
 
     fun beginResize(nodeId: String): CanvasEditorIntent = CanvasEditorIntent.BeginResize(nodeId)
 

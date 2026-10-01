@@ -73,6 +73,11 @@ sealed class ReaderBlock {
         override val sourceContentIds: List<String>,
     ) : ReaderBlock()
 
+    data class Drawing(
+        val item: NoteContentModel.Drawing,
+        override val sourceContentIds: List<String>,
+    ) : ReaderBlock()
+
     /** 📖 15-Aug-2026: one sheet of a document read inside the note; the platform draws the sheet. */
     data class DocumentPage(
         val item: NoteContentModel.MediaContent,

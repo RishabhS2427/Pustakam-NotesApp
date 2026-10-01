@@ -87,7 +87,7 @@ object CanvasPaginator {
         pageHeight: Float
     ): CanvasDocument {
         val policy = policy(pageWidth, pageHeight)
-        val ordered = contents.sortedBy { it.position }
+        val ordered = contents.filterNot { it.isOverlayDrawing() }.sortedBy { it.position }
         val index = pageIndexOfContents(ordered, policy)
         val pages = pagesFor(pageCountFor(ordered, policy), pageWidth, pageHeight)
 

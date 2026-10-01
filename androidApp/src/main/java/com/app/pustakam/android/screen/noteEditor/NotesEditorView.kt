@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardActions
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.IosShare   // 🔧 20-Jul-2026: export action
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SaveAlt
@@ -70,7 +73,13 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.material3.LocalContentColor
+import com.app.pustakam.android.widgets.drawing.DrawingCanvas
+import com.app.pustakam.android.widgets.drawing.DrawingChrome
+import com.app.pustakam.android.widgets.drawing.drawingInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
@@ -192,6 +201,10 @@ fun NoteEditorScreen(
         /**  block direct exit as my scope is getting distroyed  */
         noteEditorViewModel.changeNoteStatus(NoteStatus.onBackPress)
     }
+    val drawingTarget = noteEditorViewModel.drawing.target.collectAsStateWithLifecycle().value
+    BackHandler(enabled = drawingTarget != null) {
+        noteEditorViewModel.drawing.stop()
+    }
 
     val state = noteEditorViewModel.noteContentUiState.collectAsStateWithLifecycle()
     val stateEditor = noteEditorViewModel.noteUIState.collectAsStateWithLifecycle().value.apply {
@@ -238,6 +251,17 @@ fun NoteEditorScreen(
         ) ,
             actions = {
             val noteHistory = noteEditorViewModel.history.collectAsStateWithLifecycle().value
+                IconButton(onClick = { noteEditorViewModel.drawing.toggleOverlay() }) {
+                    Icon(
+                        imageVector = Icons.Filled.Edit,
+                        contentDescription = "Draw on note",
+                        tint = if (drawingTarget != null && drawingTarget == noteEditorViewModel.drawing.overlayId()) {
+                            colorScheme.primary
+                        } else {
+                            LocalContentColor.current
+                        }
+                    )
+                }
                 IconButton(
                 onClick = { noteEditorViewModel.undo() },
                 enabled = noteHistory.canUndo
@@ -320,7 +344,8 @@ fun NoteEditorScreen(
             }
         })
     }, onButtonOverLays = {
-        Box(Modifier.fillMaxSize()) {
+        val configuration = LocalConfiguration.current
+        if (drawingTarget == null) Box(Modifier.fillMaxSize()) {
             OverLayEditorButtons(
                 modifier = Modifier.align(alignment = Alignment.BottomEnd),
                 onAddTextField = {
@@ -331,59 +356,106 @@ fun NoteEditorScreen(
                 onLocation = { noteEditorViewModel.requestCapture(ContentType.LOCATION) },
                 onCameraAction = { noteEditorViewModel.requestCapture(ContentType.IMAGE) },
                 onImportFile = { noteEditorViewModel.openImportSheet() },
+                onDrawing = {
+                    noteEditorViewModel.addDrawingPage(
+                        configuration.screenWidthDp.toFloat(),
+                        configuration.screenHeightDp.toFloat()
+                    )
+                },
             )
         }
     }, contentList = { focusRequester ->
+        val listState = rememberLazyListState()
+        val anchors = rememberNoteAnchors(listState)
+        val density = LocalDensity.current.density
+        val listNavigator = remember(listState, density) { NoteListNavigator(listState, density) }
+        val overlaySession = noteEditorViewModel.drawing.overlay.collectAsStateWithLifecycle().value
+        val overlayActive = drawingTarget != null && drawingTarget == noteEditorViewModel.drawing.overlayId()
         Box(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                contentPadding = PaddingValues(bottom = SmartTextToolbarReservedHeight + 24.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (overlayActive && overlaySession != null) {
+                            Modifier.drawingInput(overlaySession, anchors, listNavigator)
+                        } else {
+                            Modifier
+                        }
+                    )
             ) {
-                state.value.contents.let {
-                    itemsIndexed(it, key = { _, content -> content.id }) { index, contentValue ->
-                        RenderWidget(
-                            content = contentValue,
-                            focusRequester = focusRequester,
-                            onUpdate = { value ->
-                                noteEditorViewModel.updateContent(index, value)
-                            },
-                            onDelete = { value -> noteEditorViewModel.askDeleteContent(value.id) },
-                            onShare = {},
-                            onOpenDocument = {
-                                val cid = contentValue.id
-                                noteEditorViewModel.saveThenOpen {
-                                    state.value.note?.id?.let {
-                                        navigateTo(Route.BookReader + "/${it}?contentId=${cid}")
+                LazyColumn(
+                    state = listState,
+                    contentPadding = PaddingValues(bottom = SmartTextToolbarReservedHeight + 24.dp)
+                ) {
+                    state.value.contents.let {
+                        itemsIndexed(it, key = { _, content -> content.id }) { index, contentValue ->
+                            RenderWidget(
+                                content = contentValue,
+                                focusRequester = focusRequester,
+                                onUpdate = { value ->
+                                    noteEditorViewModel.updateContent(index, value)
+                                },
+                                onDelete = { value -> noteEditorViewModel.askDeleteContent(value.id) },
+                                onShare = {},
+                                onOpenDocument = {
+                                    val cid = contentValue.id
+                                    noteEditorViewModel.saveThenOpen {
+                                        state.value.note?.id?.let {
+                                            navigateTo(Route.BookReader + "/${it}?contentId=${cid}")
+                                        }
                                     }
-                                }
-                            },
-                            onMediaPreview = {
-                                imageDataViewModel.onSetMediaToPreview(
-                                    (contentValue as NoteContentModel.MediaContent).getMediaUrl(),
-                                    contentValue.type,
-                                    mediaId = contentValue.id
-                                )
-                                when {
-                                    contentValue.type == ContentType.IMAGE  -> navigateTo(Route.ImagePreview)
-                                    contentValue.type == ContentType.VIDEO -> navigateTo(Route.VideoPreview)
-                                }
-                            })
+                                },
+                                onMediaPreview = {
+                                    imageDataViewModel.onSetMediaToPreview(
+                                        (contentValue as NoteContentModel.MediaContent).getMediaUrl(),
+                                        contentValue.type,
+                                        mediaId = contentValue.id
+                                    )
+                                    when {
+                                        contentValue.type == ContentType.IMAGE  -> navigateTo(Route.ImagePreview)
+                                        contentValue.type == ContentType.VIDEO -> navigateTo(Route.VideoPreview)
+                                    }
+                                },
+                                drawingSlot = { drawing ->
+                                    NoteDrawingBlock(
+                                        content = drawing,
+                                        session = noteEditorViewModel.drawing.session(drawing),
+                                        active = drawingTarget == drawing.id,
+                                        onActivate = { noteEditorViewModel.drawing.start(drawing.id) },
+                                        onDelete = { noteEditorViewModel.askDeleteContent(drawing.id) }
+                                    )
+                                })
+                        }
                     }
                 }
-            }
-            if (stateEditor.showAudioRecorder) {
-                val recordingContent = remember {
-                    noteEditorViewModel.addNewContent(
-                        context,
-                        contentType = ContentType.AUDIO
-                    ) as NoteContentModel.MediaContent
+                if (stateEditor.showAudioRecorder) {
+                    val recordingContent = remember {
+                        noteEditorViewModel.addNewContent(
+                            context,
+                            contentType = ContentType.AUDIO
+                        ) as NoteContentModel.MediaContent
+                    }
+                    AudioRecording(
+                        modifier = Modifier.align(Alignment.TopEnd),
+                        noteContentModel = recordingContent,
+                        onStop = {
+                            noteEditorViewModel.updateContent(content = it)
+                            noteEditorViewModel.startStopAudioRecording(false)
+                        },
+                    )
                 }
-                AudioRecording(
-                    modifier = Modifier.align(Alignment.TopEnd),
-                    noteContentModel = recordingContent,
-                    onStop = {
-                        noteEditorViewModel.updateContent(content = it)
-                        noteEditorViewModel.startStopAudioRecording(false)
-                    },
+                if (overlaySession != null) {
+                    DrawingCanvas(session = overlaySession, modifier = Modifier.matchParentSize(), anchors = anchors)
+                }
+            }
+            noteEditorViewModel.drawing.active()?.let { session ->
+                DrawingChrome(
+                    session = session,
+                    onDone = noteEditorViewModel.drawing::stop,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 16.dp)
                 )
             }
         }
@@ -489,6 +561,7 @@ fun RenderWidget(
     onShare: (content: NoteContentModel) -> Unit,
     onMediaPreview: () -> Unit,
     onOpenDocument: () -> Unit = {},   // 🔧 18-Jul-2026: open imported file in the book reader
+    drawingSlot: @Composable (NoteContentModel.Drawing) -> Unit = {},
 ) {
     var focusedMediaId by remember { mutableStateOf<String?>(null) }
     when (content.type) {
@@ -642,8 +715,13 @@ fun RenderWidget(
             }
         }
 
+        ContentType.DRAWING -> {
+            val drawing = content as NoteContentModel.Drawing
+            if (!drawing.isOverlay()) drawingSlot(drawing)
+        }
+
         // canvas-only kinds, nothing to draw in the linear editor
-        ContentType.DRAWING, ContentType.FORMULA, ContentType.TABLE -> Unit
+        ContentType.FORMULA, ContentType.TABLE -> Unit
     }
 }
 

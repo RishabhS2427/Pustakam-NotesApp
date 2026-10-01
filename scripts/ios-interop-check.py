@@ -17,7 +17,7 @@ import sys
 
 EXPORTED = [
     "core/common", "core/model", "core/richtext", "core/database", "core/network",
-    "core/data", "core/filesys", "feature/auth", "feature/notes", "shared",
+    "core/data", "core/filesys", "core/drawing", "feature/auth", "feature/notes", "shared",
 ]
 SWIFT_ROOT = "iosApp"
 

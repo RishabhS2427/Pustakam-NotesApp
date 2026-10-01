@@ -47,7 +47,10 @@ progressPage INTEGER NOT NULL DEFAULT 0,
 metaData TEXT AS RichTextMetadata,
 -- 🖼️ 20-Aug-2026 sync: how a media file is named ON THE SERVER. localPath stays device-only.
 assetId TEXT,
-checksum TEXT
+checksum TEXT,
+drawing TEXT,
+drawingSurface TEXT,
+drawingTarget TEXT
 );
 
 -- 🔧 15-Jul-2026 Phase 0.2: composite index — every content fetch filters by noteId and sorts by
@@ -125,8 +128,8 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?);
 
 -- 🔧 C1/S1: now persists title + media metadata
 insertNoteContentById:
-INSERT OR REPLACE INTO NoteContent ( id ,noteId, type, position, createdAt, updatedAt, localPath, url , text,  lat , long, address, duration, title, mimeType, sizeBytes, width, height, thumbnailPath, totalPages, progressPage, metaData, assetId, checksum )
-VALUES (? , ?, ?, ?,  ?, ?, ?, ?, ?,? , ?, ?, ?, ?, ?, ?, ?, ?, ? ,?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO NoteContent ( id ,noteId, type, position, createdAt, updatedAt, localPath, url , text,  lat , long, address, duration, title, mimeType, sizeBytes, width, height, thumbnailPath, totalPages, progressPage, metaData, assetId, checksum, drawing, drawingSurface, drawingTarget )
+VALUES (? , ?, ?, ?,  ?, ?, ?, ?, ?,? , ?, ?, ?, ?, ?, ?, ?, ?, ? ,?, ?, ?, ?, ?, ?, ?, ?);
 
 -- 📖 23-Jul-2026: reading progress is written on its own, not through a full row rewrite — the
 --   reader saves on exit and must not clobber concurrent edits to the rest of the content row.
@@ -211,7 +214,10 @@ SELECT
     NoteContent.progressPage,
     NoteContent.metaData,
     NoteContent.assetId, -- 🖼️ 20-Aug-2026 sync
-    NoteContent.checksum
+    NoteContent.checksum,
+    NoteContent.drawing,
+    NoteContent.drawingSurface,
+    NoteContent.drawingTarget
 FROM Notes
 LEFT JOIN NoteContent ON Notes.id = NoteContent.noteId
 WHERE Notes.id = :id AND Notes.ownerId = :userId
@@ -295,7 +301,10 @@ SELECT
     NoteContent.progressPage,
     NoteContent.metaData,
     NoteContent.assetId, -- 🖼️ 20-Aug-2026 sync
-    NoteContent.checksum
+    NoteContent.checksum,
+    NoteContent.drawing,
+    NoteContent.drawingSurface,
+    NoteContent.drawingTarget
 FROM Notes
 LEFT JOIN NoteContent ON Notes.id = NoteContent.noteId
 -- 🔄 20-Aug-2026 sync: deleted = 0 — a tombstone must never surface in a list, search or export

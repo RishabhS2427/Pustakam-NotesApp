@@ -33,6 +33,8 @@ struct ReaderBlockView: View {
             LinkBlockView(block: link)
         case let location as ReaderBlock.Location:
             LocationBlockView(block: location)
+        case let drawing as ReaderBlock.Drawing:
+            DrawingBlockView(block: drawing, policy: policy)
         default:
             EmptyView()
         }

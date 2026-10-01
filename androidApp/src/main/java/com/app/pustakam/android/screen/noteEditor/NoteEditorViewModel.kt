@@ -19,6 +19,9 @@ import com.app.pustakam.android.screen.NoteUIState
 import com.app.pustakam.android.screen.TaskCode
 import com.app.pustakam.android.screen.base.BaseViewModel
 import com.app.pustakam.android.screen.base.apiWithCollect
+import com.app.pustakam.android.widgets.drawing.DrawingHost
+import com.app.pustakam.core.drawing.editor.DrawCommands
+import com.app.pustakam.core.drawing.note.DrawNoteContents
 import com.app.pustakam.feature.notes.domain.editor.EditorCapabilityReducer
 import com.app.pustakam.feature.notes.domain.editor.EditorCommands
 import com.app.pustakam.feature.notes.domain.editor.EditorCapabilityState
@@ -88,6 +91,12 @@ class NoteEditorViewModel : BaseViewModel() {
     private var autoSaveJob: Job? = null
     private val _history = MutableStateFlow(NoteHistory())
     val history: StateFlow<NoteHistory> = _history.asStateFlow()
+    val drawing = DrawingHost(
+        contents = { _noteContentUiState.value.contents.toList() },
+        noteId = { _noteContentUiState.value.note?.id },
+        documentId = { null },
+        onWrite = { addContentData(it) }
+    )
 
     private fun recordHistory(kind: NoteEditKind) {
         val note = _noteContentUiState.value.note ?: return
@@ -124,6 +133,22 @@ class NoteEditorViewModel : BaseViewModel() {
                 media.forEach { applyExternalContentUpdate(it) }
             }
         }
+        viewModelScope.launch {
+            _noteContentUiState.collect { drawing.sync(it.contents.toList()) }
+        }
+    }
+
+    fun addDrawingPage(width: Float, height: Float) {
+        val note = _noteContentUiState.value.note ?: return
+        val content = DrawNoteContents.create(
+            note.id,
+            note.contents.count().toDouble(),
+            DrawCommands.pageSurface(),
+            width,
+            height
+        )
+        updateContent(content = content)
+        drawing.open(content)
     }
 
     private fun applyExternalContentUpdate(updated: NoteContentModel) {

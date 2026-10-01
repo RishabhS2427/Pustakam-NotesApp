@@ -77,6 +77,8 @@ object NoteExportBuilder {
                                 ?: "${content.latitude}, ${content.longitude}"
                         )
                     )
+
+                is NoteContentModel.Drawing -> Unit
             }
         }
         return blocks

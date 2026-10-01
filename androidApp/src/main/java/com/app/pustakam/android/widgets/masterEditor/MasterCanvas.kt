@@ -33,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -96,6 +97,23 @@ private data class LiftedWidget(
         copy(left = left + dx, top = top + dy, fingerX = fingerX + dx, fingerY = fingerY + dy)
 }
 
+data class MasterPageFrame(
+    val pageId: String,
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float,
+    val contentX: Float,
+    val contentY: Float,
+    val scale: Float
+)
+
+class MasterBoardFrames {
+    internal var reader: () -> List<MasterPageFrame> = { emptyList() }
+
+    fun current(): List<MasterPageFrame> = reader()
+}
+
 /** What a page's widgets call while one of them is carried. */
 private class WidgetLift(
     val start: (CanvasNode, Offset, Offset) -> Boolean,
@@ -122,6 +140,7 @@ fun MasterCanvas(
     keyboardInsetPx: Float = 0f,
     // 📕 25-Sep-2026 — the note's title, drawn as a hard-cover page; null or blank draws nothing
     coverTitle: String? = null,
+    frames: MasterBoardFrames? = null,
     nodeContent: @Composable (CanvasNode, Boolean) -> Unit
 ) {
     val colors = SmartTextTokens.colors
@@ -134,6 +153,29 @@ fun MasterCanvas(
     val headerDp = PAGE_HEADER_HEIGHT.value
     val scrolls = remember { mutableMapOf<String, PageScroll>() }
     var lifted by remember { mutableStateOf<LiftedWidget?>(null) }
+
+    if (frames != null) {
+        SideEffect {
+            frames.reader = {
+                val live = liveState
+                val scale = live.viewport.scale.takeIf { it > 0f } ?: 1f
+                live.visibleNodes.map { page ->
+                    val screen = CanvasCommands.screenRectOf(live.document, page, live.viewport)
+                    val scroll = scrolls[page.id]
+                    MasterPageFrame(
+                        pageId = page.id,
+                        x = screen.x,
+                        y = screen.y,
+                        width = screen.width,
+                        height = screen.height,
+                        contentX = screen.x - (scroll?.horizontal?.value ?: 0) / pxPerDp,
+                        contentY = screen.y + headerDp - (scroll?.vertical?.value ?: 0) / pxPerDp,
+                        scale = scale
+                    )
+                }
+            }
+        }
+    }
 
     val lift = remember(pxPerDp) {
         WidgetLift(
@@ -423,6 +465,10 @@ private fun BoxScope.MasterPage(
                                 scale = scale,
                                 isEditing = widget.id == state.editingNodeId,
                                 isLifted = CanvasCommands.isLifted(state, widget.id),
+                                canResize = CanvasCommands.canResizeWidget(state, widget),
+                                onResize = { dx, dy ->
+                                    CanvasCommands.resizedTo(liveState, widget.id, dx, dy)?.let(latestIntent)
+                                },
                                 origin = {
                                     Offset(
                                         screen.x + widget.rect.x * scale - scroll.horizontal.value / pxPerDp,
@@ -477,13 +523,17 @@ private fun MasterPageWidget(
     scale: Float,
     isEditing: Boolean,
     isLifted: Boolean,
+    canResize: Boolean,
+    onResize: (Float, Float) -> Unit,
     origin: () -> Offset,
     onIntent: (CanvasEditorIntent) -> Unit,
     onMeasured: (String, Float) -> Unit,
     lift: WidgetLift,
     nodeContent: @Composable (CanvasNode, Boolean) -> Unit
 ) {
+    val colors = SmartTextTokens.colors
     val pxPerDp = LocalDensity.current.density
+    val latestResize by rememberUpdatedState(onResize)
     // the gesture below is keyed on the id and outlives recompositions — read everything live
     val latestWidget by rememberUpdatedState(widget)
     val latestOrigin by rememberUpdatedState(origin)
@@ -530,8 +580,14 @@ private fun MasterPageWidget(
             .then(
                 // a text field owns its own long-press (selection), so text is lifted through
                 // the shield below instead; everything else lifts from here
-                if (widget.isTextWidget) Modifier
-                else Modifier.pointerInput(widget.id, pxPerDp) { liftGesture(null) }
+                when {
+                    widget.isTextWidget -> Modifier
+                    widget.isDrawingWidget && isEditing -> Modifier
+                    widget.isDrawingWidget -> Modifier.pointerInput(widget.id, pxPerDp) {
+                        liftGesture { latestIntent(CanvasCommands.setEditing(widget.id)) }
+                    }
+                    else -> Modifier.pointerInput(widget.id, pxPerDp) { liftGesture(null) }
+                }
             )
     ) {
         if (widget.isTextWidget) {
@@ -551,6 +607,26 @@ private fun MasterPageWidget(
             ScaledCard(widget = widget, scale = scale, onMeasured = onMeasured) {
                 nodeContent(widget, isEditing)
             }
+        }
+        if (canResize) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(2.dp)
+                    .size(22.dp)
+                    .background(colors.accent, RoundedCornerShape(4.dp))
+                    .pointerInput(widget.id, pxPerDp) {
+                        detectDragGestures(
+                            onDragStart = { latestIntent(CanvasCommands.beginResize(widget.id)) },
+                            onDragEnd = { latestIntent(CanvasCommands.endResize()) },
+                            onDragCancel = { latestIntent(CanvasCommands.endResize()) },
+                            onDrag = { change, drag ->
+                                change.consume()
+                                latestResize(drag.x / pxPerDp, drag.y / pxPerDp)
+                            }
+                        )
+                    }
+            )
         }
     }
 }

@@ -61,6 +61,30 @@ object NoteContentObjectHelper {
         )
     }
 
+    fun createDrawing(
+        noteId: String,
+        positionedAt: Double,
+        surface: String,
+        width: Int,
+        height: Int,
+        drawing: String,
+        target: String
+    ): NoteContentModel.Drawing {
+        val now = "${getCurrentTimestamp()}"
+        return NoteContentModel.Drawing(
+            id = UniqueIdGenerator.generateUniqueId(),
+            noteId = noteId,
+            position = positionedAt,
+            createdAt = now,
+            updatedAt = now,
+            surface = surface,
+            width = width,
+            height = height,
+            drawing = drawing,
+            target = target,
+        )
+    }
+
     fun createLocation(noteId: String, positionedAt: Double, lat: Double = 0.0, long: Double = 0.0): NoteContentModel.Location {
         val now = "${getCurrentTimestamp()}"
         return NoteContentModel.Location(

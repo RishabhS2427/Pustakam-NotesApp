@@ -72,6 +72,7 @@ object NoteCanvasConverter {
         is NoteContentModel.MediaContent -> copy(position = newPosition)
         is NoteContentModel.Link -> copy(position = newPosition)
         is NoteContentModel.Location -> copy(position = newPosition)
+        is NoteContentModel.Drawing -> copy(position = newPosition)
     }
 
     private const val PAGE_PADDING = CanvasNode.PAGE_PADDING

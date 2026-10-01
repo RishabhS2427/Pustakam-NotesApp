@@ -44,6 +44,7 @@ fun BookPager(
     onPageChanged: (Int) -> Unit = {},
     // 📖 15-Aug-2026: only inline documents resize the list under the pager; off, nothing changes
     inlineDocumentsEnabled: Boolean = false,
+    zoomEnabled: Boolean = true,
     pageContent: @Composable (Int) -> Unit,
 ) {
     if (pageCount <= 0) return
@@ -98,7 +99,7 @@ fun BookPager(
 
     Box(
         modifier = modifier
-            .zoomable()
+            .zoomable(zoomEnabled)
             .fillMaxSize()
             .pointerInput(pageCount) {
                 containerWidth = size.width.toFloat()

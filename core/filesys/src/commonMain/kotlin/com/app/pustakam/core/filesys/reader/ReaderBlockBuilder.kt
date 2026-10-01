@@ -155,6 +155,11 @@ object ReaderBlockBuilder {
                         )
                     )
                 }
+
+                is NoteContentModel.Drawing -> if (!content.isOverlay()) {
+                    flush()
+                    blocks.add(ReaderBlock.Drawing(content, listOf(content.id)))
+                }
             }
         }
         flush()

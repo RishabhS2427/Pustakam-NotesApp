@@ -19,6 +19,15 @@ class NoteEditorViewModel: ObservableObject {
     @Published var state = NoteEditorUIState()
     @Published var capabilities = EditorCapabilityCommands.shared.empty()
 
+    private(set) lazy var drawing = DrawingHost(
+        contents: { [weak self] in self?.state.noteContents ?? [] },
+        noteId: { [weak self] in self?.state.note?.id },
+        documentId: { nil },
+        onWrite: { [weak self] in self?.addContentData(content: $0) }
+    )
+
+    private var drawingChanges = Set<AnyCancellable>()
+
     private let adapter: NotesBridgeAdapter
     private let contentBridge: NoteContentBridge
     private var contentUpdatesHandle: Closeable?
@@ -74,6 +83,7 @@ class NoteEditorViewModel: ObservableObject {
         load(noteId: noteId)
         observeContentUpdates()
         startAutoSave()
+        observeDrawing()
     }
 
     deinit {
@@ -81,6 +91,38 @@ class NoteEditorViewModel: ObservableObject {
         contentUpdatesHandle?.close()
         contentSyncHandle?.close()
         contentBridge.dispose()
+    }
+
+    private func observeDrawing() {
+        drawing.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &drawingChanges)
+        $state
+            .map(\.noteContents)
+            .sink { [weak self] contents in self?.drawing.sync(contents) }
+            .store(in: &drawingChanges)
+    }
+
+    func addDrawingPage(width: Float, height: Float) {
+        guard let note = state.note else { return }
+        let content = DrawNoteContents.shared.create(
+            noteId: note.id,
+            position: Double(state.noteContents.count),
+            surface: DrawCommands.shared.pageSurface(),
+            width: width,
+            height: height
+        )
+        updateContent(content: content)
+        drawing.open(content)
+    }
+
+    func addContentData(content: NoteContentModel) {
+        dirtyContentIds.insert(content.id)
+        if let index = state.noteContents.firstIndex(where: { $0.id == content.id }) {
+            state.noteContents[index] = content
+        } else {
+            state.noteContents.append(content)
+        }
     }
 
     private func observeContentUpdates() {

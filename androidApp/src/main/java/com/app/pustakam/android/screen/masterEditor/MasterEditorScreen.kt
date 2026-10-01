@@ -1,5 +1,6 @@
 package com.app.pustakam.android.screen.masterEditor
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.TouchApp
@@ -54,7 +56,12 @@ import com.app.pustakam.android.screen.editor.EditorCapabilityCallbacks
 import com.app.pustakam.android.screen.editor.EditorCapabilityHost
 import com.app.pustakam.android.screen.editor.permissionsFor
 import com.app.pustakam.android.widgets.audio.AudioRecording
+import com.app.pustakam.android.widgets.masterEditor.MasterBoardFrames
 import com.app.pustakam.android.widgets.masterEditor.MasterCanvas
+import com.app.pustakam.android.widgets.drawing.DrawingCanvas
+import com.app.pustakam.android.widgets.drawing.DrawingChrome
+import com.app.pustakam.android.widgets.drawing.drawingInput
+import com.app.pustakam.core.drawing.editor.DrawCommands
 import com.app.pustakam.android.widgets.smartText.SmartTextKeyboardToolbar
 import com.app.pustakam.android.widgets.smartText.SmartTextSheet
 import com.app.pustakam.android.widgets.smartText.SmartTextSheetHost
@@ -89,6 +96,16 @@ fun MasterEditorScreen(
     val context = LocalContext.current
     val density = LocalDensity.current
     val imeHeightPx = WindowInsets.ime.getBottom(density).toFloat()
+    val drawingTarget by viewModel.drawing.target.collectAsStateWithLifecycle()
+    BackHandler(enabled = drawingTarget != null) { viewModel.finishDrawing() }
+    val boardFrames = remember { MasterBoardFrames() }
+    val boardAnchors = remember(boardFrames) {
+        {
+            boardFrames.current().map {
+                DrawCommands.mappedAnchor(it.pageId, it.x, it.y, it.width, it.height, it.contentX, it.contentY, it.scale)
+            }
+        }
+    }
 
     OnLifecycleEvent { _, event ->
         when (event) {
@@ -151,100 +168,134 @@ fun MasterEditorScreen(
             .fillMaxSize()
             .background(colors.page)
     ) {
-        MasterCanvas(
-            state = canvas,
-            onIntent = viewModel::onCanvasIntent,
-            onRename = viewModel::renameNode,
-            onMeasured = viewModel::onWidgetMeasured,
-            keyboardInsetPx = imeHeightPx,
-            coverTitle = uiState.note?.title
-        ) { node, isEditing ->
-            val nodeContent = uiState.note?.contents?.firstOrNull { it.id == node.contentId }
-            MasterNodeContent(
-                node = node,
-                isEditing = isEditing,
-                scale = canvas.viewport.scale,
-                textState = uiState.textFor(node.id),
-                content = nodeContent,
-                onTextIntent = { viewModel.onTextIntent(node.id, it) },
-                onFocused = { viewModel.onCanvasIntent(CanvasCommands.setEditing(node.id)) },
-                onOpenMedia = {
-                    val media = nodeContent as? NoteContentModel.MediaContent
-                    when {
-                        media == null -> Unit
-                        // documents open in the reader, which reads the saved file off disk
-                        media.type.isDoc() -> viewModel.saveThenOpen {
-                            uiState.note?.id?.let { id ->
-                                navigateTo(Route.BookReader + "/$id?contentId=${media.id}")
-                            }
-                        }
-
-                        else -> {
-                            imageDataViewModel.onSetMediaToPreview(
-                                media.getMediaUrl(),
-                                media.type,
-                                mediaId = media.id
-                            )
-                            when {
-                                media.type.isImage() -> navigateTo(Route.ImagePreview)
-                                media.type == ContentType.VIDEO -> navigateTo(Route.VideoPreview)
-                                else -> Unit
-                            }
-                        }
-                    }
-                },
-                onDelete = { viewModel.deleteNode(node.id) },
-                keyboardInsetPx = imeHeightPx
-            )
-        }
-
-        Row(
+        val overlayActive = drawingTarget != null && drawingTarget == viewModel.drawing.overlayId()
+        val overlaySession = viewModel.drawing.overlay.collectAsStateWithLifecycle().value
+        Box(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 16.dp)
-                .background(colors.toolbar, RoundedCornerShape(12.dp))
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                .fillMaxSize()
+                .then(
+                    if (overlayActive && overlaySession != null) {
+                        Modifier.drawingInput(overlaySession, boardAnchors)
+                    } else {
+                        Modifier
+                    }
+                )
         ) {
-            IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomOut()) }) {
-                Icon(Icons.Default.ZoomOut, contentDescription = "Zoom out", tint = colors.onSurface)
-            }
-            Text(
-                text = "${canvas.zoomPercent}%",
-                style = TextStyle(color = colors.onSurfaceMuted, fontSize = 13.sp)
-            )
-            IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomIn()) }) {
-                Icon(Icons.Default.ZoomIn, contentDescription = "Zoom in", tint = colors.onSurface)
-            }
-            IconButton(
-                onClick = { showAttach = true },
+            MasterCanvas(
+                state = canvas,
+                onIntent = viewModel::onCanvasIntent,
+                onRename = viewModel::renameNode,
+                onMeasured = viewModel::onWidgetMeasured,
+                keyboardInsetPx = imeHeightPx,
+                coverTitle = uiState.note?.title,
+                frames = boardFrames
+            ) { node, isEditing ->
+                val nodeContent = uiState.note?.contents?.firstOrNull { it.id == node.contentId }
+                MasterNodeContent(
+                    node = node,
+                    isEditing = isEditing,
+                    scale = canvas.viewport.scale,
+                    textState = uiState.textFor(node.id),
+                    content = nodeContent,
+                    onTextIntent = { viewModel.onTextIntent(node.id, it) },
+                    onFocused = { viewModel.onCanvasIntent(CanvasCommands.setEditing(node.id)) },
+                    onOpenMedia = {
+                        val media = nodeContent as? NoteContentModel.MediaContent
+                        when {
+                            media == null -> Unit
+                            // documents open in the reader, which reads the saved file off disk
+                            media.type.isDoc() -> viewModel.saveThenOpen {
+                                uiState.note?.id?.let { id ->
+                                    navigateTo(Route.BookReader + "/$id?contentId=${media.id}")
+                                }
+                            }
 
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Zoom in", tint = colors.onSurface)
-            }
-            IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomToFit()) }) {
-                Icon(
-                    Icons.Default.CenterFocusStrong,
-                    contentDescription = "Fit to screen",
-                    tint = colors.onSurface
+                            else -> {
+                                imageDataViewModel.onSetMediaToPreview(
+                                    media.getMediaUrl(),
+                                    media.type,
+                                    mediaId = media.id
+                                )
+                                when {
+                                    media.type.isImage() -> navigateTo(Route.ImagePreview)
+                                    media.type == ContentType.VIDEO -> navigateTo(Route.VideoPreview)
+                                    else -> Unit
+                                }
+                            }
+                        }
+                    },
+                    onDelete = { viewModel.deleteNode(node.id) },
+                    keyboardInsetPx = imeHeightPx,
+                    drawingSession = (nodeContent as? NoteContentModel.Drawing)?.let { viewModel.drawing.session(it) }
                 )
             }
-            CanvasCommands.tools().forEach { tool ->
-                val active = canvas.tool == tool
-                IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.setTool(tool)) }) {
+            if (overlaySession != null) {
+                DrawingCanvas(session = overlaySession, modifier = Modifier.matchParentSize(), anchors = boardAnchors)
+            }
+        }
+
+        val drawingSession = viewModel.drawing.active()
+        if (drawingTarget != null && drawingSession != null) {
+            DrawingChrome(
+                session = drawingSession,
+                onDone = viewModel::finishDrawing,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 16.dp)
+            )
+        } else {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 16.dp)
+                    .background(colors.toolbar, RoundedCornerShape(12.dp))
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomOut()) }) {
+                    Icon(Icons.Default.ZoomOut, contentDescription = "Zoom out", tint = colors.onSurface)
+                }
+                Text(
+                    text = "${canvas.zoomPercent}%",
+                    style = TextStyle(color = colors.onSurfaceMuted, fontSize = 13.sp)
+                )
+                IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomIn()) }) {
+                    Icon(Icons.Default.ZoomIn, contentDescription = "Zoom in", tint = colors.onSurface)
+                }
+                IconButton(
+                    onClick = { showAttach = true },
+
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Zoom in", tint = colors.onSurface)
+                }
+                IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomToFit()) }) {
                     Icon(
-                        imageVector = when (tool) {
-                            CanvasTool.SELECT -> Icons.Default.TouchApp
-                            CanvasTool.HAND -> Icons.Default.PanTool
-                            CanvasTool.ZOOM -> Icons.Default.ZoomIn
-                            CanvasTool.LOCK -> Icons.Default.Lock
-                        },
-                        contentDescription = CanvasCommands.toolLabel(tool),
-                        tint = if (active) colors.accent else colors.onSurface
+                        Icons.Default.CenterFocusStrong,
+                        contentDescription = "Fit to screen",
+                        tint = colors.onSurface
                     )
+                }
+                CanvasCommands.tools().forEach { tool ->
+                    val active = canvas.tool == tool
+                    IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.setTool(tool)) }) {
+                        Icon(
+                            imageVector = when (tool) {
+                                CanvasTool.SELECT -> Icons.Default.TouchApp
+                                CanvasTool.HAND -> Icons.Default.PanTool
+                                CanvasTool.ZOOM -> Icons.Default.ZoomIn
+                                CanvasTool.LOCK -> Icons.Default.Lock
+                            },
+                            contentDescription = CanvasCommands.toolLabel(tool),
+                            tint = if (active) colors.accent else colors.onSurface
+                        )
+                    }
+                }
+                IconButton(onClick = viewModel::toggleDrawingOverlay) {
+                    Icon(Icons.Default.Edit, contentDescription = "Draw on board", tint = colors.onSurface)
                 }
             }
         }

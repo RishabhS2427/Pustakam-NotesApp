@@ -27,5 +27,6 @@ fun ReaderBlockContent(
         is ReaderBlock.DocumentPage -> DocumentPageBlockView(block, modifier, documents)
         is ReaderBlock.Link -> LinkBlockView(block, modifier)
         is ReaderBlock.Location -> LocationBlockView(block, modifier)
+        is ReaderBlock.Drawing -> DrawingBlockView(block, policy, modifier)
     }
 }

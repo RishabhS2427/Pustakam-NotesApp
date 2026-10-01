@@ -17,21 +17,27 @@ struct NoteTextField: UIViewRepresentable {
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.isEditable = true
+        textView.isSelectable = true
         textView.backgroundColor = .clear
+        textView.textContainer.lineBreakMode = .byWordWrapping
+        textView.textContainer.widthTracksTextView = true
         textView.font = UIFont.systemFont(ofSize: fontSize)
         textView.delegate = context.coordinator
         textView.isScrollEnabled = false
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 10
         textView.keyboardDismissMode = .interactive
+        textView.showsVerticalScrollIndicator = false
+        textView.setContentCompressionResistancePriority(.required, for: .vertical)
+        textView.setContentHuggingPriority(.required, for: .vertical)
         return textView
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
-
         // Sync attributed text
         if uiView.attributedText != attributedText {
             uiView.attributedText = attributedText
+            // Recalculate height when text changes from the code side
         }
 
         // Sync selection
@@ -43,6 +49,17 @@ struct NoteTextField: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
+    }
+
+    // MARK: - Height Calculation Engine
+    static func recalculateHeight(view: UITextView, result: Binding<CGFloat>) {
+        // Measure fitting size accurately based on current width limits
+        let newSize = view.sizeThatFits(CGSize(width: view.frame.width, height: CGFloat.greatestFiniteMagnitude))
+        if result.wrappedValue != newSize.height {
+            DispatchQueue.main.async {
+                result.wrappedValue = newSize.height
+            }
+        }
     }
 
     // MARK: - Coordinator
@@ -62,7 +79,6 @@ struct NoteTextField: UIViewRepresentable {
 
         // Selection changes
         func textViewDidChangeSelection(_ textView: UITextView) {
-
             let range = textView.selectedRange
             parent.selectedRange = range
 
@@ -73,48 +89,11 @@ struct NoteTextField: UIViewRepresentable {
             }
 
             let caretRect = textView.caretRect(for: textRange.end)
-
             let convertedRect = textView.convert(
                 caretRect,
                 to: textView.superview
             )
-
             parent.onSelectionRectChange(convertedRect)
         }
-
-        // 🔧 Prevent unwanted scroll on Enter
-//        func textView(
-//            _ textView: UITextView,
-//            shouldChangeTextIn range: NSRange,
-//            replacementText text: String
-//        ) -> Bool {
-//
-//            // Save scroll offset BEFORE UIKit adjusts it
-//            lastContentOffset = textView.contentOffset
-//
-//            DispatchQueue.main.async {
-//                self.restoreScrollIfNeeded(textView)
-//            }
-//
-//            return true
-//        }
-
-//        private func restoreScrollIfNeeded(_ textView: UITextView) {
-//
-//            guard let textRange = textView.selectedTextRange else { return }
-//
-//            let caretRect = textView.caretRect(for: textRange.end)
-//
-//            let visibleRect = CGRect(
-//                origin: textView.contentOffset,
-//                size: textView.bounds.size
-//            )
-//
-//            // If caret is already visible, restore offset
-//            if visibleRect.contains(caretRect) {
-//                textView.setContentOffset(lastContentOffset, animated: false)
-//            }
-//        }
     }
 }
-

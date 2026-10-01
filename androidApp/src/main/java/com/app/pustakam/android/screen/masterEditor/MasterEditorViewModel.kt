@@ -63,7 +63,12 @@ import com.app.pustakam.core.model.models.BaseResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import com.app.pustakam.android.widgets.drawing.DrawingHost
+import com.app.pustakam.core.drawing.editor.DrawCommands
+import com.app.pustakam.core.drawing.note.DrawNoteContents
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
@@ -120,6 +125,20 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     private var lastSavedDirtyIds: Set<String> = emptySet()
     private val _state = MutableStateFlow(MasterEditorUiState())
     val state: StateFlow<MasterEditorUiState> = _state.asStateFlow()
+    val drawing = DrawingHost(
+        contents = { _state.value.note?.contents.orEmpty() },
+        noteId = { _state.value.note?.id },
+        documentId = { null },
+        onWrite = { onEditorIntent(EditorIntent.UpdateContent(it)) }
+    )
+
+    init {
+        viewModelScope.launch {
+            _state.map { it.note?.contents }
+                .distinctUntilChanged { old, new -> old === new }
+                .collect { drawing.sync(it.orEmpty()) }
+        }
+    }
 
     fun load(id: String?) = readFromDataBase(id)
 
@@ -158,7 +177,7 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         val state = _state.value
         if (CanvasCommands.pageForSpawn(state.canvas) == null) return
         state.note?.contents.orEmpty()
-            .filter { state.canvas.document.nodeForContent(it.id) == null }
+            .filter { !it.isOverlayDrawing() && state.canvas.document.nodeForContent(it.id) == null }
             .forEach { spawnWidgetNode(it.type, it.id, housekeeping = true) }
     }
 
@@ -389,7 +408,8 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         _state.update { it.copy(canvas = next) }
         if (CanvasCommands.gestureStarted(before, next)) gestureStart = next.document
         val edited = !housekeeping && CanvasCommands.editsLayout(before, next, intent, gestureStart)
-        if (CanvasCommands.gestureEnded(before, next)) gestureStart = null
+        val ended = CanvasCommands.gestureEnded(before, next)
+        if (ended) gestureStart = null
         persistCanvasChange(before, next, intent, edited)
         val waiting = pendingCanvas
         if (waiting != null && next.viewport.widthPx > 0f) {
@@ -397,6 +417,8 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
             applyCanvas(waiting)
         }
         adoptPendingRemote()
+        followDrawingEditing(before, next)
+        if (ended) syncDrawingFrames(next)
     }
 
     /**
@@ -494,10 +516,61 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
             addTextBlock()
             return
         }
+        if (kind == ContentType.DRAWING && content == null) {
+            addDrawingWidget()
+            return
+        }
         if (_state.value.note == null) return
         if (content != null) onEditorIntent(EditorIntent.AddContent(content))
         spawnWidgetNode(kind, content?.id)
         if (kind == ContentType.TEXT) refreshMissingTexts()
+    }
+
+    fun addDrawingWidget() {
+        val note = _state.value.note ?: return
+        val page = CanvasCommands.pageForSpawn(_state.value.canvas) ?: addBarePage(housekeeping = false)
+        val draft = DrawNoteContents.create(note.id, note.contents.size.toDouble(), DrawCommands.widgetSurface(), 0f, 0f)
+        val node = CanvasCommands.widgetIn(_state.value.canvas, page, ContentType.DRAWING, draft.id)
+        val content = DrawNoteContents.framed(draft, node.rect.width, node.rect.height)
+        onEditorIntent(EditorIntent.AddContent(content))
+        onCanvasIntent(CanvasEditorIntent.AddNode(node))
+        dispatchCanvas(CanvasCommands.revealEnd(page.id), housekeeping = true)
+        onCanvasIntent(CanvasCommands.setEditing(node.id))
+    }
+
+    fun toggleDrawingOverlay() {
+        if (!drawing.isOverlayActive()) onCanvasIntent(CanvasCommands.useSelectTool())
+        drawing.toggleOverlay()
+    }
+
+    fun finishDrawing() {
+        if (CanvasCommands.editingDrawingId(_state.value.canvas) != null) {
+            onCanvasIntent(CanvasCommands.exitEditing())
+        } else {
+            drawing.stop()
+        }
+    }
+
+    private fun followDrawingEditing(before: CanvasEditorState, next: CanvasEditorState) {
+        val editing = CanvasCommands.editingDrawingId(next)
+        if (editing == CanvasCommands.editingDrawingId(before)) return
+        val contentId = editing?.let { next.document.nodeById(it)?.contentId }
+        val content = contentId?.let { id -> _state.value.note?.contents?.firstOrNull { it.id == id } }
+        when {
+            content is NoteContentModel.Drawing -> drawing.open(content)
+            !drawing.isOverlayActive() -> drawing.stop()
+        }
+    }
+
+    private fun syncDrawingFrames(canvas: CanvasEditorState) {
+        _state.value.note?.contents.orEmpty()
+            .filterIsInstance<NoteContentModel.Drawing>()
+            .forEach { content ->
+                val node = canvas.document.nodeForContent(content.id)?.takeIf { it.isDrawingWidget } ?: return@forEach
+                if (!DrawNoteContents.isFramed(content, node.rect.width, node.rect.height)) {
+                    onEditorIntent(EditorIntent.UpdateContent(DrawNoteContents.framed(content, node.rect.width, node.rect.height)))
+                }
+            }
     }
 
     /**

@@ -55,6 +55,7 @@ object BlockHeightEstimator {
         is ReaderBlock.DocumentPage -> policy.usableHeight
         is ReaderBlock.Link -> policy.linkHeight
         is ReaderBlock.Location -> policy.locationHeight
+        is ReaderBlock.Drawing -> drawingHeight(block.item, policy)
     }
 
     fun richHeight(block: RichBlock, policy: PageLayoutPolicy): Float = when (block) {
@@ -139,6 +140,9 @@ object BlockHeightEstimator {
         val ratio = media.width.toFloat() / media.height.toFloat()
         return (height * ratio).coerceAtMost(policy.usableWidth)
     }
+
+    fun drawingHeight(drawing: NoteContentModel.Drawing, policy: PageLayoutPolicy): Float =
+        (policy.usableWidth * drawing.aspect()).coerceIn(policy.imageMinHeight, policy.usableHeight)
 
     const val VIDEO_ASPECT = 9f / 16f
 

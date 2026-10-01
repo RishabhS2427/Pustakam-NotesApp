@@ -673,4 +673,46 @@ class CanvasEditorReducerTest {
         assertEquals(CanvasCommands.fittedPageWidth(state), cover.width)
         assertEquals(CanvasCommands.fittedPageHeight(state), cover.height)
     }
+
+    @Test
+    fun tappingADrawingWidgetEditsItWithoutMovingThePage() {
+        val drawing = widget("d1", "p1", 24f, 24f, 0.0, kind = ContentType.DRAWING, height = 200f)
+        val before = board(page("p1", 0f, 0.0), drawing)
+        val state = before.after(CanvasEditorIntent.SetEditing("d1"))
+        assertEquals("d1", state.editingNodeId)
+        assertEquals("d1", CanvasCommands.editingDrawingId(state))
+        assertEquals("p1", state.selectedNodeId)
+        assertEquals(before.node("p1").rect, state.node("p1").rect)
+        assertEquals(before.viewport, state.viewport)
+        assertFalse(state.permits.canPan)
+    }
+
+    @Test
+    fun aDrawingWidgetResizesAndPushesWhatIsBelowIt() {
+        val state = board(
+            page("p1", 0f, 0.0),
+            widget("d1", "p1", 24f, 24f, 0.0, kind = ContentType.DRAWING, height = 100f),
+            widget("w1", "p1", 24f, 132f, 1.0)
+        )
+        assertTrue(CanvasCommands.canResizeWidget(state, state.node("d1")))
+        assertFalse(CanvasCommands.canResizeWidget(state, state.node("w1")))
+        val resized = state.after(
+            CanvasEditorIntent.BeginResize("d1"),
+            CanvasEditorIntent.ResizeNode("d1", 300f, 260f),
+            CanvasEditorIntent.EndResize
+        )
+        assertEquals(260f, resized.node("d1").rect.height)
+        resized.document.assertNothingOverlaps()
+        val editing = state.after(CanvasEditorIntent.SetEditing("d1"))
+        assertFalse(CanvasCommands.canResizeWidget(editing, editing.node("d1")))
+    }
+
+    @Test
+    fun theLockToolKeepsDrawingWidgetsClosed() {
+        val state = board(
+            page("p1", 0f, 0.0),
+            widget("d1", "p1", 24f, 24f, 0.0, kind = ContentType.DRAWING)
+        ).after(CanvasCommands.useLockTool(), CanvasEditorIntent.SetEditing("d1"))
+        assertNull(state.editingNodeId)
+    }
 }

@@ -1,0 +1,3 @@
+ALTER TABLE NoteContent ADD COLUMN drawing TEXT;
+
+ALTER TABLE NoteContent ADD COLUMN drawingSurface TEXT;

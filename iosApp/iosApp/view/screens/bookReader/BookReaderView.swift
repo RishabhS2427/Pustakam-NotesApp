@@ -208,6 +208,7 @@ struct BookReaderView: View {
     @State private var readingMode: ReadingMode = .page
     /// the MediaContent whose reading progress this book represents
     @State private var progressContentId: String? = nil
+    @StateObject private var annotations = BookReaderAnnotations()
 
     var body: some View {
         ZStack {
@@ -220,7 +221,7 @@ struct BookReaderView: View {
                 switch readingMode {
                 case .page:
 
-                    BookPageCurlView(pages: pages, startIndex: currentIndex) { index in
+                    BookPageCurlView(pages: pages, startIndex: currentIndex, annotations: annotations) { index in
                         currentIndex = index
 
                         saveProgress()
@@ -229,33 +230,59 @@ struct BookReaderView: View {
                 case .scroll:
 
                     if let pdfPath = singlePdfPath {
-                        NativePdfScrollView(path: pdfPath, startPageIndex: currentIndex) { index in
+                        NativePdfScrollView(path: pdfPath, startPageIndex: currentIndex, ink: annotations.pdfInk) { index in
                             currentIndex = index
                             saveProgress()
                         }
+                        .overlay { pdfInk }
                         .ignoresSafeArea(edges: .bottom)
                     } else {
-                        BookScrollReader(pages: pages, startIndex: currentIndex) { index in
+                        BookScrollReader(
+                            pages: pages,
+                            startIndex: currentIndex,
+                            annotations: annotations,
+                            zoomEnabled: !annotations.zoomLocked
+                        ) { index in
                             currentIndex = index
                             saveProgress()   // 📖 same for scrolling
                         }
                         .ignoresSafeArea(edges: .bottom)
                     }
                 }
-                VStack {
-                    Spacer()
-                    Text("\(currentIndex + 1) / \(pages.count)")
-                        .font(.caption).foregroundColor(BookPalette.paper)
-                        .padding(.horizontal, 12).padding(.vertical, 4)
-                        .background(Capsule().fill(Color.black.opacity(0.45)))
-                        .padding(.bottom, 10)
+                if !annotations.annotating {
+                    VStack {
+                        Spacer()
+                        Text("\(currentIndex + 1) / \(pages.count)")
+                            .font(.caption).foregroundColor(BookPalette.paper)
+                            .padding(.horizontal, 12).padding(.vertical, 4)
+                            .background(Capsule().fill(Color.black.opacity(0.45)))
+                            .padding(.bottom, 10)
+                    }
                 }
             }
+            annotationChrome
         }
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                BackButton(action: { dismiss() })
+                BackButton(action: {
+                    if annotations.annotating {
+                        annotations.drawing.stop()
+                    } else {
+                        dismiss()
+                    }
+                })
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if !pages.isEmpty {
+                    Button {
+                        annotations.drawing.toggleOverlay()
+                    } label: {
+                        Image(systemName: DrawingIcons.draw)
+                            .foregroundColor(annotations.annotating ? Theme.Colors.primary : BookPalette.paper)
+                    }
+                    .accessibilityLabel(Text("Write on document"))
+                }
             }
             // 📖 23-Jul-2026: reading-mode toggle, right where it's used (mirrored in Settings)
             ToolbarItem(placement: .topBarTrailing) {
@@ -278,7 +305,27 @@ struct BookReaderView: View {
             readerPrefs.observeReadingMode { readingMode = $0 }
         }
 
-        .onDisappear { saveProgress() }
+        .onDisappear {
+            saveProgress()
+            annotations.flushAnnotation()
+        }
+    }
+
+    @ViewBuilder
+    private var pdfInk: some View {
+        if let session = annotations.drawing.overlay {
+            DrawingCanvas(session: session, anchors: annotations.pdfInk.anchors, input: annotations.annotating)
+        }
+    }
+
+    @ViewBuilder
+    private var annotationChrome: some View {
+        if annotations.annotating, let session = annotations.drawing.active() {
+            DrawingChrome(session: session, onDone: { annotations.drawing.stop() })
+                .padding(.horizontal, 12)
+                .padding(.bottom, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
     }
 
 
@@ -323,6 +370,7 @@ struct BookReaderView: View {
                         self.pages = built
                         self.progressContentId = media.id
                         self.currentIndex = resolvedStart
+                        self.annotations.followNote(noteId: media.noteId, documentId: media.id)
                         // 🔧 18-Jul-2026: remember this book for the home-screen widget
                         BookWidgetStore.saveLastBook(noteId: media.noteId,
                                                      title: media.title.isEmpty ? "Untitled note" : media.title)
@@ -340,6 +388,8 @@ struct BookReaderView: View {
 struct BookScrollReader: UIViewRepresentable {
     let pages: [BookPageItem]
     let startIndex: Int
+    var annotations: BookReaderAnnotations? = nil
+    var zoomEnabled: Bool = true
     let onPageChanged: (Int) -> Void
 
     private static let pageHeight: CGFloat = 560
@@ -396,16 +446,26 @@ struct BookScrollReader: UIViewRepresentable {
         }
 
         context.coordinator.applyPendingStartIfReady(scrollView)
+        scrollView.pinchGestureRecognizer?.isEnabled = zoomEnabled
     }
 
     private var content: AnyView {
         AnyView(LazyVStack(spacing: Self.spacing) {
-            ForEach(Array(pages.enumerated()), id: \.element.id) { _, page in
-                BookPageContentView(page: page, allowPageZoom: false)
+            ForEach(Array(pages.enumerated()), id: \.element.id) { index, page in
+                pageFace(page, index: index)
                     .frame(height: Self.pageHeight)
             }
         }
         .padding(.vertical, Self.spacing))
+    }
+
+    @ViewBuilder
+    private func pageFace(_ page: BookPageItem, index: Int) -> some View {
+        if let annotations {
+            AnnotatedBookPage(page: page, index: index, allowPageZoom: false, annotations: annotations)
+        } else {
+            BookPageContentView(page: page, allowPageZoom: false)
+        }
     }
 
     private func layout(_ scrollView: UIScrollView, coordinator: Coordinator) {
@@ -496,6 +556,7 @@ final class ResumeAwareScrollView: UIScrollView {
 struct NativePdfScrollView: UIViewRepresentable {
     let path: String
     let startPageIndex: Int
+    var ink: PdfInkAnchors? = nil
     let onPageChanged: (Int) -> Void
 
     func makeUIView(context: Context) -> PDFView {
@@ -519,6 +580,7 @@ struct NativePdfScrollView: UIViewRepresentable {
         }
         // observe page changes for the progress counter
         context.coordinator.observe(pdfView)
+        ink?.attach(pdfView)
         return pdfView
     }
 
@@ -557,6 +619,7 @@ struct NativePdfScrollView: UIViewRepresentable {
 struct BookPageCurlView: UIViewControllerRepresentable {
     let pages: [BookPageItem]
     let startIndex: Int
+    var annotations: BookReaderAnnotations? = nil
     let onPageChanged: (Int) -> Void
 
     func makeUIViewController(context: Context) -> UIPageViewController {
@@ -574,14 +637,20 @@ struct BookPageCurlView: UIViewControllerRepresentable {
         context.coordinator.pages = pages
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(pages: pages, onPageChanged: onPageChanged) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(pages: pages, annotations: annotations, onPageChanged: onPageChanged)
+    }
 
     // 🔧 18-Jul-2026: index travels on the hosting controller — no tag hacks
-    final class BookPageHost: UIHostingController<BookPageContentView> {
+    final class BookPageHost: UIHostingController<AnyView> {
         let index: Int
-        init(index: Int, page: BookPageItem) {
+        init(index: Int, page: BookPageItem, annotations: BookReaderAnnotations?) {
             self.index = index
-            super.init(rootView: BookPageContentView(page: page))
+            if let annotations {
+                super.init(rootView: AnyView(AnnotatedBookPage(page: page, index: index, annotations: annotations)))
+            } else {
+                super.init(rootView: AnyView(BookPageContentView(page: page)))
+            }
             view.backgroundColor = .clear
         }
         @MainActor required dynamic init?(coder aDecoder: NSCoder) { fatalError("not used") }
@@ -589,14 +658,16 @@ struct BookPageCurlView: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
         var pages: [BookPageItem]
+        let annotations: BookReaderAnnotations?
         let onPageChanged: (Int) -> Void
-        init(pages: [BookPageItem], onPageChanged: @escaping (Int) -> Void) {
+        init(pages: [BookPageItem], annotations: BookReaderAnnotations?, onPageChanged: @escaping (Int) -> Void) {
             self.pages = pages
+            self.annotations = annotations
             self.onPageChanged = onPageChanged
         }
 
         func pageController(at index: Int) -> UIViewController {
-            BookPageHost(index: index, page: pages[index])
+            BookPageHost(index: index, page: pages[index], annotations: annotations)
         }
 
         func pageViewController(_ pvc: UIPageViewController, viewControllerBefore vc: UIViewController) -> UIViewController? {
@@ -637,6 +708,7 @@ struct BookPageContentView: View {
     let page: BookPageItem
 
     var allowPageZoom: Bool = true
+    var ink: AnyView? = nil
     @State private var showPreview = false
 
     var body: some View {
@@ -650,8 +722,13 @@ struct BookPageContentView: View {
                 Spacer()
             }
             pageBody.padding(.horizontal, 4).padding(.vertical, 4)
+            if !isPdf, let ink {
+                ink
+            }
         }
     }
+
+    private var isPdf: Bool { if case .pdf = page { return true }; return false }
 
     private var isCover: Bool { if case .cover = page { return true }; return false }
 
@@ -700,7 +777,7 @@ struct BookPageContentView: View {
         case .pdf(let path, let pageIndex, _, _, _):
             VStack(spacing: 6) {
             MaybeZoomable(enabled: allowPageZoom) {
-                    PdfSheetView(path: path, pageIndex: pageIndex)
+                    PdfSheetView(path: path, pageIndex: pageIndex, ink: ink)
                 }
             }
 
@@ -790,6 +867,7 @@ actor PdfRenderGate {
 struct PdfSheetView: View {
     let path: String
     let pageIndex: Int
+    var ink: AnyView? = nil
     @State private var image: UIImage?
     // 🐛 23-Jul-2026 FIX (infinite loader): a null image was indistinguishable from "still loading",
     //   so if the render ever produced nothing the sheet span forever. Track a done flag and show a
@@ -800,6 +878,7 @@ struct PdfSheetView: View {
         Group {
             if let image {
                 Image(uiImage: image).resizable().scaledToFit()
+                    .overlay { ink }
             } else if didFinish {
                 // rendered but empty — better than an endless spinner
                 Color.clear
