@@ -53,7 +53,11 @@ object DrawReducer {
         DrawIntent.Clear -> cleared(state)
         is DrawIntent.ApplyRemote -> remote(state, intent.op)
         is DrawIntent.SetReadOnly -> idle(state).copy(readOnly = intent.readOnly)
-        is DrawIntent.RestoreToolbox -> state.copy(settings = intent.settings, colors = intent.colors, mode = intent.mode)
+        is DrawIntent.RestoreToolbox -> state.copy(
+            settings = DrawToolRegistry.fitted(intent.settings, intent.mode),
+            colors = intent.colors,
+            mode = intent.mode
+        )
     }
 
     fun nextClock(state: DrawEditorState): Long = state.document.clock + 1
@@ -158,7 +162,7 @@ object DrawReducer {
 
     private fun modeChanged(state: DrawEditorState, mode: DrawToolMode): DrawEditorState {
         val tool = if (DrawToolRegistry.isAvailable(state.tool, mode)) state.tool else DrawToolId.PEN
-        return idle(state).copy(mode = mode, tool = tool)
+        return idle(state).copy(mode = mode, tool = tool, settings = DrawToolRegistry.fitted(state.settings, mode))
     }
 
     private fun colorPicked(state: DrawEditorState, intent: DrawIntent.SetColor): DrawEditorState {

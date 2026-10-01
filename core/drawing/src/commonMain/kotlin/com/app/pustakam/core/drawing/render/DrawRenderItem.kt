@@ -5,7 +5,7 @@ import com.app.pustakam.core.drawing.model.DrawBlend
 import com.app.pustakam.core.drawing.model.DrawColor
 import com.app.pustakam.core.richtext.master.model.CanvasRect
 
-enum class DrawRenderKind { FILL_PATH, STROKE_PATH, DABS }
+enum class DrawRenderKind { FILL_PATH, STROKE_PATH, DABS, GROUP_BEGIN, GROUP_END }
 
 enum class DrawCap { BUTT, ROUND, SQUARE }
 
@@ -26,6 +26,10 @@ class DrawRenderItem(
     val bounds: CanvasRect
 ) {
     val isClear: Boolean get() = blend == DrawBlend.CLEAR
+
+    val isGroupBegin: Boolean get() = kind == DrawRenderKind.GROUP_BEGIN
+
+    val isGroupEnd: Boolean get() = kind == DrawRenderKind.GROUP_END
 
     val dabCount: Int get() = dabs.size / DAB_STRIDE
 
@@ -56,6 +60,14 @@ class DrawRenderItem(
             blend: DrawBlend,
             bounds: CanvasRect
         ) = DrawRenderItem(key, DrawRenderKind.DABS, FloatArray(0), dabs, color, opacity, 0f, DrawCap.ROUND, DrawJoin.ROUND, blend, hardness, bounds)
+
+        fun groupBegin(key: String, bounds: CanvasRect) = marker(key, DrawRenderKind.GROUP_BEGIN, bounds)
+
+        fun groupEnd(key: String, bounds: CanvasRect) = marker(key, DrawRenderKind.GROUP_END, bounds)
+
+        private fun marker(key: String, kind: DrawRenderKind, bounds: CanvasRect) = DrawRenderItem(
+            key, kind, FloatArray(0), FloatArray(0), DrawColor.TRANSPARENT, 1f, 0f, DrawCap.ROUND, DrawJoin.ROUND, DrawBlend.NORMAL, 1f, bounds
+        )
     }
 }
 

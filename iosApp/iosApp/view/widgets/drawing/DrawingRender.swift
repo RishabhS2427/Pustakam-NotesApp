@@ -81,6 +81,16 @@ enum DrawingRender {
         let commands = DrawCommands.shared
         for entry in entries {
             let item = entry.item
+            if commands.isGroupBegin(item: item) {
+                context.saveGState()
+                context.beginTransparencyLayer(in: commands.groupBounds(entry: entry).cgRect, auxiliaryInfo: nil)
+                continue
+            }
+            if commands.isGroupEnd(item: item) {
+                context.endTransparencyLayer()
+                context.restoreGState()
+                continue
+            }
             context.saveGState()
             context.concatenate(entry.matrix.affine)
             if commands.isDabs(item: item) {
@@ -102,6 +112,20 @@ enum DrawingRender {
             context.restoreGState()
         }
         paths?.endFrame()
+    }
+
+    static func image(base: UIImage, entries: [DrawRenderEntry]) -> UIImage {
+        let size = CGSize(width: max(base.size.width * base.scale, 1), height: max(base.size.height * base.scale, 1))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: format).image { renderer in
+            base.draw(in: CGRect(origin: .zero, size: size))
+            let context = renderer.cgContext
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
+            draw(entries, in: context, paths: nil)
+            context.endTransparencyLayer()
+        }
     }
 
     private static func drawDabs(_ item: DrawRenderItem, in context: CGContext) {

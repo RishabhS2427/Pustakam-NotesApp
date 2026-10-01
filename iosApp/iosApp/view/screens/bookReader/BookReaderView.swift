@@ -274,6 +274,11 @@ struct BookReaderView: View {
                 })
             }
             ToolbarItem(placement: .topBarTrailing) {
+                if annotations.annotating, let session = annotations.drawing.active() {
+                    DrawingHistoryButtons(session: session, tint: BookPalette.paper)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 if !pages.isEmpty {
                     Button {
                         annotations.drawing.toggleOverlay()
@@ -322,9 +327,6 @@ struct BookReaderView: View {
     private var annotationChrome: some View {
         if annotations.annotating, let session = annotations.drawing.active() {
             DrawingChrome(session: session, onDone: { annotations.drawing.stop() })
-                .padding(.horizontal, 12)
-                .padding(.bottom, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
     }
 

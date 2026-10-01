@@ -8,25 +8,98 @@ struct DrawingChrome: View {
     let onDone: () -> Void
 
     @State private var panel: DrawPanel = DrawCommands.shared.noPanel()
+    @State private var placement = DrawCommands.shared.toolbarPlacement()
+    @State private var dragStart: DrawToolbarPlacement?
+    @State private var size: CGSize = .zero
+
+    private var commands: DrawCommands { DrawCommands.shared }
 
     var body: some View {
-        DrawingToolbar(session: session, onPanel: { panel = $0 }, onDone: onDone)
+        GeometryReader { proxy in
+            let area = proxy.size
+            let fitted = fit(placement, in: area)
+            DrawingToolbar(
+                session: session,
+                vertical: fitted.vertical,
+                onPanel: { panel = $0 },
+                onDone: onDone,
+                onMove: { move(by: $0, in: area) },
+                onMoveEnd: { dragStart = nil },
+                onTurn: { placement = commands.rotateToolbar(placement: fitted) }
+            )
             .id(ObjectIdentifier(session))
-            .sheet(isPresented: Binding(
-                get: { panel != DrawCommands.shared.noPanel() },
-                set: { if !$0 { panel = DrawCommands.shared.noPanel() } }
-            )) {
-                DrawingPanelSheet(session: session, panel: panel, onDismiss: { panel = DrawCommands.shared.noPanel() })
-            }
-            .onChange(of: ObjectIdentifier(session)) { _, _ in panel = DrawCommands.shared.noPanel() }
+            .background(
+                GeometryReader { toolbar in
+                    Color.clear.preference(key: DrawingToolbarSizeKey.self, value: toolbar.size)
+                }
+            )
+            .onPreferenceChange(DrawingToolbarSizeKey.self) { size = $0 }
+            .frame(
+                width: fitted.vertical ? nil : length(area.width),
+                height: fitted.vertical ? length(area.height) : nil,
+                alignment: .topLeading
+            )
+            .offset(
+                x: CGFloat(fitted.left(width: Float(size.width))),
+                y: CGFloat(fitted.top(height: Float(size.height)))
+            )
+            .opacity(fitted.placed ? 1 : 0)
+        }
+        .sheet(isPresented: Binding(
+            get: { panel != DrawCommands.shared.noPanel() },
+            set: { if !$0 { panel = DrawCommands.shared.noPanel() } }
+        )) {
+            DrawingPanelSheet(session: session, panel: panel, onDismiss: { panel = DrawCommands.shared.noPanel() })
+        }
+        .onChange(of: ObjectIdentifier(session)) { _, _ in panel = DrawCommands.shared.noPanel() }
+    }
+
+    private func length(_ area: CGFloat) -> CGFloat {
+        CGFloat(commands.toolbarMaxLength(areaLength: Float(area)))
+    }
+
+    private func fit(_ value: DrawToolbarPlacement, in area: CGSize) -> DrawToolbarPlacement {
+        commands.fitToolbar(
+            placement: value,
+            width: Float(size.width),
+            height: Float(size.height),
+            areaWidth: Float(area.width),
+            areaHeight: Float(area.height)
+        )
+    }
+
+    private func move(by translation: CGSize, in area: CGSize) {
+        let start = dragStart ?? fit(placement, in: area)
+        dragStart = start
+        placement = commands.moveToolbar(
+            placement: start,
+            deltaX: Float(translation.width),
+            deltaY: Float(translation.height),
+            width: Float(size.width),
+            height: Float(size.height),
+            areaWidth: Float(area.width),
+            areaHeight: Float(area.height)
+        )
+    }
+}
+
+private struct DrawingToolbarSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
     }
 }
 
 struct DrawingToolbar: View {
 
     let session: DrawingSession
+    var vertical: Bool = false
     let onPanel: (DrawPanel) -> Void
     let onDone: () -> Void
+    var onMove: (CGSize) -> Void = { _ in }
+    var onMoveEnd: () -> Void = {}
+    var onTurn: () -> Void = {}
 
     @Environment(\.colorScheme) private var scheme
     @State private var toolbar: DrawToolbarState?
@@ -37,18 +110,32 @@ struct DrawingToolbar: View {
 
     var body: some View {
         let current = toolbar ?? commands.toolbar(state: session.current)
-        ViewThatFits(in: .horizontal) {
-            row(current)
-            ScrollView(.horizontal, showsIndicators: false) { row(current) }
+        ViewThatFits(in: vertical ? .vertical : .horizontal) {
+            strip(current)
+            ScrollView(vertical ? .vertical : .horizontal, showsIndicators: false) { strip(current) }
         }
+        .fixedSize(horizontal: vertical, vertical: !vertical)
         .background(RoundedRectangle(cornerRadius: 12).fill(palette.toolbar))
         .onReceive(session.$state.map { DrawCommands.shared.toolbar(state: $0) }.removeDuplicates()) { toolbar = $0 }
     }
 
-    private func row(_ current: DrawToolbarState) -> some View {
-        HStack(spacing: 2) {
+    private func strip(_ current: DrawToolbarState) -> some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+        return layout {
+            Image(systemName: DrawingIcons.move)
+                .font(.system(size: 16))
+                .foregroundColor(palette.onSurfaceMuted)
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(coordinateSpace: .global)
+                        .onChanged { onMove($0.translation) }
+                        .onEnded { _ in onMoveEnd() }
+                )
+                .accessibilityLabel(Text("Move toolbar"))
+            DrawingToolButton(icon: DrawingIcons.turn, label: "Turn toolbar", tint: palette.onSurface, action: onTurn)
             DrawingToolButton(icon: DrawingIcons.done, label: "Done", tint: palette.accent, action: onDone)
-            DrawingToolbarDivider()
+            DrawingToolbarDivider(vertical: vertical)
             ForEach(current.tools, id: \.id) { spec in
                 DrawingToolButton(
                     icon: DrawingIcons.tool(spec.iconKey),
@@ -63,15 +150,8 @@ struct DrawingToolbar: View {
                 }
             }
             DrawingColorDot(color: current.color) { onPanel(commands.colorPanel()) }
-            DrawingToolbarDivider()
-            DrawingToolButton(icon: DrawingIcons.undo, label: "Undo", tint: palette.onSurface, enabled: current.canUndo) {
-                session.dispatch(commands.undo())
-            }
-            DrawingToolButton(icon: DrawingIcons.redo, label: "Redo", tint: palette.onSurface, enabled: current.canRedo) {
-                session.dispatch(commands.redo())
-            }
             if current.navigates {
-                DrawingToolbarDivider()
+                DrawingToolbarDivider(vertical: vertical)
                 DrawingToolButton(icon: DrawingIcons.zoomOut, label: "Zoom out", tint: palette.onSurface) {
                     session.dispatch(commands.zoomOut())
                 }
@@ -90,7 +170,7 @@ struct DrawingToolbar: View {
                     }
                 }
             }
-            DrawingToolbarDivider()
+            DrawingToolbarDivider(vertical: vertical)
             if current.showsPaper {
                 DrawingToolButton(icon: DrawingIcons.paper, label: "Paper", tint: palette.onSurface) {
                     onPanel(commands.paperPanel())
@@ -100,8 +180,27 @@ struct DrawingToolbar: View {
                 onPanel(commands.settingsPanel())
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
+        .padding(.horizontal, vertical ? 2 : 6)
+        .padding(.vertical, vertical ? 6 : 2)
+    }
+}
+
+struct DrawingHistoryButtons: View {
+
+    @ObservedObject var session: DrawingSession
+    let tint: Color
+
+    var body: some View {
+        let commands = DrawCommands.shared
+        let state = session.state
+        HStack(spacing: 4) {
+            DrawingToolButton(icon: DrawingIcons.undo, label: "Undo", tint: tint, enabled: commands.canUndo(state: state)) {
+                session.dispatch(commands.undo())
+            }
+            DrawingToolButton(icon: DrawingIcons.redo, label: "Redo", tint: tint, enabled: commands.canRedo(state: state)) {
+                session.dispatch(commands.redo())
+            }
+        }
     }
 }
 
@@ -127,13 +226,15 @@ struct DrawingToolButton: View {
 
 struct DrawingToolbarDivider: View {
 
+    var vertical: Bool = false
+
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Rectangle()
             .fill(SmartTextPalette.of(scheme).divider)
-            .frame(width: 1, height: 24)
-            .padding(.horizontal, 4)
+            .frame(width: vertical ? 24 : 1, height: vertical ? 1 : 24)
+            .padding(vertical ? .vertical : .horizontal, 4)
     }
 }
 

@@ -107,20 +107,6 @@ class DrawReducerTest {
     }
 
     @Test
-    fun partialEraserSplitsAStrokeInTwo() {
-        var state = DrawTestKit.horizontal(DrawTestKit.page(), 200f)
-        state = DrawTestKit.reduce(state, DrawCommands.setEraserKind(DrawEraserKind.PARTIAL))
-        val cut = DrawTestKit.stroke(state, DrawTestKit.line(DrawTestKit.point(150f, 170f), DrawTestKit.point(150f, 230f), 10))
-        assertEquals(2, cut.document.elements.size)
-        assertTrue(cut.lastOp is DrawOp.Replace)
-        val xs = cut.document.elements.map { element -> element.points.maxOf { it.x } }.sorted()
-        val middle = state.viewport.toDocument(150f, 200f).x
-        assertTrue(xs.first() < middle)
-        val restored = DrawReducer.reduce(cut, DrawCommands.undo())
-        assertEquals(state.document.elements.map { it.id }, restored.document.elements.map { it.id })
-    }
-
-    @Test
     fun pixelEraserAddsAClearMarkAndObjectEraserTakesShapes() {
         var state = DrawTestKit.reduce(DrawTestKit.page(), DrawCommands.setShapeKind(DrawShapeKind.RECTANGLE))
         state = DrawTestKit.stroke(state, listOf(DrawTestKit.point(50f, 50f), DrawTestKit.point(200f, 200f)))

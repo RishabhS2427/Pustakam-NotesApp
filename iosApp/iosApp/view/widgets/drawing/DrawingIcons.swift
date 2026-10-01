@@ -36,6 +36,10 @@ enum DrawingIcons {
 
     static let draw = "pencil.tip.crop.circle"
 
+    static let move = "arrow.up.and.down.and.arrow.left.and.right"
+
+    static let turn = "rectangle.portrait.rotate"
+
     static func tool(_ iconKey: String) -> String {
         switch iconKey {
         case penKey: return "pencil.tip"

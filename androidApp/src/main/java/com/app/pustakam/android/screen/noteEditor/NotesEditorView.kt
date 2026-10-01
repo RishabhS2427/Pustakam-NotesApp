@@ -79,6 +79,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.LocalContentColor
 import com.app.pustakam.android.widgets.drawing.DrawingCanvas
 import com.app.pustakam.android.widgets.drawing.DrawingChrome
+import com.app.pustakam.core.drawing.note.DrawNoteContents
 import com.app.pustakam.android.widgets.drawing.drawingInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
@@ -283,8 +284,7 @@ fun NoteEditorScreen(
 
                 IconButton(
                     onClick = {
-                        val route = if (id.isNotnull()) Route.MasterEditor +"/$id" else Route.MasterEditor
-                        navigateTo(route)
+                        noteEditorViewModel.openWorkspace { noteId -> navigateTo(Route.MasterEditor + "/$noteId") }
                     }
                 ) {
                     Icon(
@@ -387,10 +387,11 @@ fun NoteEditorScreen(
                     state = listState,
                     contentPadding = PaddingValues(bottom = SmartTextToolbarReservedHeight + 24.dp)
                 ) {
-                    state.value.contents.let {
-                        itemsIndexed(it, key = { _, content -> content.id }) { index, contentValue ->
+                    state.value.contents.let { contents ->
+                        val renderItem: @Composable (Int, NoteContentModel, Boolean) -> Unit = { index, contentValue, paired ->
                             RenderWidget(
                                 content = contentValue,
+                                paired = paired,
                                 focusRequester = focusRequester,
                                 onUpdate = { value ->
                                     noteEditorViewModel.updateContent(index, value)
@@ -409,7 +410,8 @@ fun NoteEditorScreen(
                                     imageDataViewModel.onSetMediaToPreview(
                                         (contentValue as NoteContentModel.MediaContent).getMediaUrl(),
                                         contentValue.type,
-                                        mediaId = contentValue.id
+                                        mediaId = contentValue.id,
+                                        noteId = contentValue.noteId
                                     )
                                     when {
                                         contentValue.type == ContentType.IMAGE  -> navigateTo(Route.ImagePreview)
@@ -425,6 +427,17 @@ fun NoteEditorScreen(
                                         onDelete = { noteEditorViewModel.askDeleteContent(drawing.id) }
                                     )
                                 })
+                        }
+                        itemsIndexed(contents, key = { _, content -> content.id }) { index, contentValue ->
+                            val copy = DrawNoteContents.editedCopyOf(contents, contentValue.id)
+                            when {
+                                DrawNoteContents.showsWithOriginal(contents, contentValue) -> Unit
+                                copy == null -> renderItem(index, contentValue, false)
+                                else -> Row(horizontalArrangement = Arrangement.spacedBy(PAIRED_SPACING)) {
+                                    Box(modifier = Modifier.weight(1f)) { renderItem(index, contentValue, true) }
+                                    Box(modifier = Modifier.weight(1f)) { renderItem(contents.indexOf(copy), copy, true) }
+                                }
+                            }
                         }
                     }
                 }
@@ -453,9 +466,8 @@ fun NoteEditorScreen(
                     session = session,
                     onDone = noteEditorViewModel.drawing::stop,
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        .matchParentSize()
                         .navigationBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 16.dp)
                 )
             }
         }
@@ -466,6 +478,12 @@ fun NoteEditorScreen(
 
 @Composable
 fun rememberFocusRequester() = remember { FocusRequester() }
+
+private val PAIRED_SPACING = 8.dp
+
+private val PAIRED_GUTTER = 32.dp
+
+private const val PAIRED_ASPECT = 1.5f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -562,8 +580,10 @@ fun RenderWidget(
     onMediaPreview: () -> Unit,
     onOpenDocument: () -> Unit = {},   // 🔧 18-Jul-2026: open imported file in the book reader
     drawingSlot: @Composable (NoteContentModel.Drawing) -> Unit = {},
+    paired: Boolean = false,
 ) {
     var focusedMediaId by remember { mutableStateOf<String?>(null) }
+    val pairedHeight = ((LocalConfiguration.current.screenWidthDp.dp - PAIRED_GUTTER) / 2) * PAIRED_ASPECT
     when (content.type) {
         ContentType.TEXT -> {
             val textContent = content as NoteContentModel.TextContent
@@ -585,6 +605,8 @@ fun RenderWidget(
             val path = contentImage.localPath ?: contentImage.url
             ImageCard(
                 imageUrl = path, modifier = Modifier, media = contentImage,
+                widthFraction = if (paired) 1f else 0.7f,
+                fixedHeight = if (paired) pairedHeight else null,
                 onShowActions = { visible ->
                     focusedMediaId = when {
                         visible -> contentImage.id

@@ -23,8 +23,8 @@ object DrawEraserTool : DrawToolHandler {
         when (context.settings.eraserKind) {
             DrawEraserKind.PIXEL -> DrawToolPreview(listOfNotNull(eraseMark(context, gesture)), emptySet())
             DrawEraserKind.STROKE, DrawEraserKind.OBJECT -> DrawToolPreview(emptyList(), gesture.touchedIds.toSet())
-            DrawEraserKind.PARTIAL -> split(context, gesture).let { split ->
-                DrawToolPreview(split.after, split.before.map { it.id }.toSet())
+            DrawEraserKind.PARTIAL -> carve(context, gesture).let { carved ->
+                DrawToolPreview(carved.after, carved.before.map { it.id }.toSet())
             }
         }
 
@@ -39,7 +39,7 @@ object DrawEraserTool : DrawToolHandler {
                 .takeIf { it.isNotEmpty() }
                 ?.let { DrawOp.Remove(it, context.author, context.clock) }
 
-            DrawEraserKind.PARTIAL -> split(context, gesture)
+            DrawEraserKind.PARTIAL -> carve(context, gesture)
                 .takeIf { it.before.isNotEmpty() }
                 ?.let { DrawOp.Replace(it.before, it.after, context.author, context.clock) }
         }
@@ -62,7 +62,8 @@ object DrawEraserTool : DrawToolHandler {
     }
 
     private fun accepts(kind: DrawEraserKind, element: DrawElement): Boolean = when (kind) {
-        DrawEraserKind.STROKE, DrawEraserKind.PARTIAL -> element.isStroke
+        DrawEraserKind.STROKE -> element.isStroke
+        DrawEraserKind.PARTIAL -> !element.isErase
         DrawEraserKind.OBJECT -> true
         DrawEraserKind.PIXEL -> false
     }
@@ -70,21 +71,21 @@ object DrawEraserTool : DrawToolHandler {
     private fun radiusFor(context: DrawToolContext, element: DrawElement): Float =
         context.settings.eraserSize / 2f / context.space.scaleOf(element.anchorId)
 
-    private class Split(val before: List<DrawElement>, val after: List<DrawElement>)
+    private class Carved(val before: List<DrawElement>, val after: List<DrawElement>)
 
-    private fun split(context: DrawToolContext, gesture: DrawGesture): Split {
+    private fun carve(context: DrawToolContext, gesture: DrawGesture): Carved {
         val before = mutableListOf<DrawElement>()
         val after = mutableListOf<DrawElement>()
         for (id in gesture.touchedIds) {
             val element = context.document.elementById(id) ?: continue
             val local = context.space.toElement(element.anchorId, gesture.points)
-            val runs = DrawEraseGeometry.keptRuns(element, local, radiusFor(context, element)) ?: continue
+            val cuts = DrawEraseGeometry.cutsFor(element, local, radiusFor(context, element))
+            if (cuts.isEmpty()) continue
+            val carved = element.copy(cuts = element.cuts + cuts, clock = context.clock)
             before.add(element)
-            runs.forEach { run ->
-                after.add(element.copy(id = context.newId(), points = run, clock = context.clock))
-            }
+            if (!DrawEraseGeometry.isErasedAway(carved)) after.add(carved)
         }
-        return Split(before, after)
+        return Carved(before, after)
     }
 
     private fun eraseMark(context: DrawToolContext, gesture: DrawGesture): DrawElement? {

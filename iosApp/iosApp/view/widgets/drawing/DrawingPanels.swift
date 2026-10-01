@@ -83,7 +83,7 @@ private struct DrawingEraserPanel: View {
         let commands = DrawCommands.shared
         DrawingSectionTitle(title: "Eraser")
         DrawingChips(
-            items: commands.eraserKinds(),
+            items: commands.eraserKinds(state: state),
             isSelected: { commands.isEraser(state: state, kind: $0) },
             label: { commands.eraserLabel(kind: $0) },
             onSelect: { session.dispatch(commands.setEraserKind(kind: $0)) }

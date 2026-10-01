@@ -12,8 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Edit
@@ -32,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -214,7 +219,8 @@ fun MasterEditorScreen(
                                 imageDataViewModel.onSetMediaToPreview(
                                     media.getMediaUrl(),
                                     media.type,
-                                    mediaId = media.id
+                                    mediaId = media.id,
+                                    noteId = media.noteId
                                 )
                                 when {
                                     media.type.isImage() -> navigateTo(Route.ImagePreview)
@@ -234,70 +240,89 @@ fun MasterEditorScreen(
             }
         }
 
+        var barHeight by remember { mutableIntStateOf(0) }
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onSizeChanged { barHeight = it.height }
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 16.dp)
+                .background(colors.toolbar, RoundedCornerShape(12.dp))
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            IconButton(onClick = viewModel::undo, enabled = uiState.history.canUndo) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Undo,
+                    contentDescription = "Undo",
+                    tint = if (uiState.history.canUndo) colors.onSurface else colors.onSurfaceMuted
+                )
+            }
+            IconButton(onClick = viewModel::redo, enabled = uiState.history.canRedo) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Redo,
+                    contentDescription = "Redo",
+                    tint = if (uiState.history.canRedo) colors.onSurface else colors.onSurfaceMuted
+                )
+            }
+            IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomOut()) }) {
+                Icon(Icons.Default.ZoomOut, contentDescription = "Zoom out", tint = colors.onSurface)
+            }
+            Text(
+                text = "${canvas.zoomPercent}%",
+                style = TextStyle(color = colors.onSurfaceMuted, fontSize = 13.sp)
+            )
+            IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomIn()) }) {
+                Icon(Icons.Default.ZoomIn, contentDescription = "Zoom in", tint = colors.onSurface)
+            }
+            IconButton(
+                onClick = { showAttach = true },
+
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Zoom in", tint = colors.onSurface)
+            }
+            IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomToFit()) }) {
+                Icon(
+                    Icons.Default.CenterFocusStrong,
+                    contentDescription = "Fit to screen",
+                    tint = colors.onSurface
+                )
+            }
+            CanvasCommands.tools().forEach { tool ->
+                val active = canvas.tool == tool
+                IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.setTool(tool)) }) {
+                    Icon(
+                        imageVector = when (tool) {
+                            CanvasTool.SELECT -> Icons.Default.TouchApp
+                            CanvasTool.HAND -> Icons.Default.PanTool
+                            CanvasTool.ZOOM -> Icons.Default.ZoomIn
+                            CanvasTool.LOCK -> Icons.Default.Lock
+                        },
+                        contentDescription = CanvasCommands.toolLabel(tool),
+                        tint = if (active) colors.accent else colors.onSurface
+                    )
+                }
+            }
+            IconButton(onClick = viewModel::toggleDrawingOverlay) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Draw on board",
+                    tint = if (overlayActive) colors.accent else colors.onSurface
+                )
+            }
+        }
         val drawingSession = viewModel.drawing.active()
         if (drawingTarget != null && drawingSession != null) {
             DrawingChrome(
                 session = drawingSession,
                 onDone = viewModel::finishDrawing,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 16.dp)
+                    .matchParentSize()
+                    .statusBarsPadding()
+                    .padding(bottom = with(density) { barHeight.toDp() })
             )
-        } else {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 16.dp)
-                    .background(colors.toolbar, RoundedCornerShape(12.dp))
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomOut()) }) {
-                    Icon(Icons.Default.ZoomOut, contentDescription = "Zoom out", tint = colors.onSurface)
-                }
-                Text(
-                    text = "${canvas.zoomPercent}%",
-                    style = TextStyle(color = colors.onSurfaceMuted, fontSize = 13.sp)
-                )
-                IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomIn()) }) {
-                    Icon(Icons.Default.ZoomIn, contentDescription = "Zoom in", tint = colors.onSurface)
-                }
-                IconButton(
-                    onClick = { showAttach = true },
-
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Zoom in", tint = colors.onSurface)
-                }
-                IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomToFit()) }) {
-                    Icon(
-                        Icons.Default.CenterFocusStrong,
-                        contentDescription = "Fit to screen",
-                        tint = colors.onSurface
-                    )
-                }
-                CanvasCommands.tools().forEach { tool ->
-                    val active = canvas.tool == tool
-                    IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.setTool(tool)) }) {
-                        Icon(
-                            imageVector = when (tool) {
-                                CanvasTool.SELECT -> Icons.Default.TouchApp
-                                CanvasTool.HAND -> Icons.Default.PanTool
-                                CanvasTool.ZOOM -> Icons.Default.ZoomIn
-                                CanvasTool.LOCK -> Icons.Default.Lock
-                            },
-                            contentDescription = CanvasCommands.toolLabel(tool),
-                            tint = if (active) colors.accent else colors.onSurface
-                        )
-                    }
-                }
-                IconButton(onClick = viewModel::toggleDrawingOverlay) {
-                    Icon(Icons.Default.Edit, contentDescription = "Draw on board", tint = colors.onSurface)
-                }
-            }
         }
         if (uiState.capabilities.isRecordingAudio) {
             val recordingContent = remember {

@@ -1,8 +1,11 @@
 package com.app.pustakam.core.richtext.master.presentation
 
+import com.app.pustakam.core.common.util.ContentType
+import com.app.pustakam.core.model.models.response.notes.NoteCanvasNode
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 import com.app.pustakam.core.richtext.master.model.CanvasDocument
 import com.app.pustakam.core.richtext.master.model.CanvasNode
+import com.app.pustakam.core.richtext.master.model.CanvasRect
 import com.app.pustakam.core.richtext.master.model.CanvasRole
 
 /**
@@ -66,6 +69,45 @@ object NoteCanvasConverter {
             .sortedBy { rank[it.id] ?: Int.MAX_VALUE }
             .mapIndexed { index, content -> content.repositioned(index.toDouble()) }
     }
+
+    fun toNoteNodes(document: CanvasDocument): List<NoteCanvasNode> = document.nodes.map(::toNoteNode)
+
+    fun toNoteNode(node: CanvasNode): NoteCanvasNode = NoteCanvasNode(
+        id = node.id,
+        kind = node.kind.name,
+        role = node.role.name,
+        name = node.name,
+        contentId = node.contentId,
+        parentId = node.parentId,
+        x = node.rect.x,
+        y = node.rect.y,
+        width = node.rect.width,
+        height = node.rect.height,
+        z = node.z,
+        locked = node.locked,
+        hidden = node.hidden,
+        links = node.links,
+        slotOrder = node.slotOrder,
+        pageOrder = node.pageOrder
+    )
+
+    fun fromNoteNodes(nodes: List<NoteCanvasNode>): CanvasDocument = CanvasDocument(nodes.map(::fromNoteNode))
+
+    fun fromNoteNode(node: NoteCanvasNode): CanvasNode = CanvasNode(
+        id = node.id,
+        kind = ContentType.entries.firstOrNull { it.name == node.kind } ?: ContentType.TEXT,
+        name = node.name,
+        rect = CanvasRect(node.x, node.y, node.width, node.height),
+        z = node.z,
+        contentId = node.contentId,
+        parentId = node.parentId,
+        locked = node.locked,
+        hidden = node.hidden,
+        links = node.links,
+        role = CanvasRole.entries.firstOrNull { it.name == node.role } ?: CanvasRole.WIDGET,
+        slotOrder = node.slotOrder,
+        pageOrder = node.pageOrder
+    )
 
     private fun NoteContentModel.repositioned(newPosition: Double): NoteContentModel = when (this) {
         is NoteContentModel.TextContent -> copy(position = newPosition)

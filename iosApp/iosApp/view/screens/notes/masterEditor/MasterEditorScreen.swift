@@ -23,6 +23,7 @@ struct MasterEditorScreen: View {
     @State private var keyboardHeight: CGFloat = 0
     @State private var autoFocused = false
     @State private var boardFrames = MasterBoardFrames()
+    @State private var barHeight: CGFloat = 0
 
     private var palette: SmartTextPalette { SmartTextPalette.of(scheme) }
 
@@ -33,9 +34,11 @@ struct MasterEditorScreen: View {
             canvas
             banner
             bottomBar
+            drawingChrome
             keyboardToolbar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onPreferenceChange(MasterBarHeightKey.self) { barHeight = $0 }
         .background(palette.page.ignoresSafeArea())
         .onAppear { viewModel.refresh() }
         .onReceive(
@@ -151,14 +154,20 @@ struct MasterEditorScreen: View {
         }
     }
 
-    @ViewBuilder
     private var bottomBar: some View {
+        zoomBar
+            .background(
+                GeometryReader { bar in
+                    Color.clear.preference(key: MasterBarHeightKey.self, value: bar.size.height)
+                }
+            )
+    }
+
+    @ViewBuilder
+    private var drawingChrome: some View {
         if viewModel.drawing.target != nil, let session = viewModel.drawing.active() {
             DrawingChrome(session: session, onDone: { viewModel.finishDrawing() })
-                .padding(.horizontal, 12)
-                .padding(.bottom, 28)
-        } else {
-            zoomBar
+                .padding(.bottom, barHeight)
         }
     }
 
@@ -220,6 +229,16 @@ struct MasterEditorScreen: View {
 
     private var zoomBar: some View {
         HStack(spacing: 4) {
+            barButton(icon: DrawingIcons.undo, tint: viewModel.history.canUndo ? palette.onSurface : palette.onSurfaceMuted) {
+                viewModel.undo()
+            }
+            .disabled(!viewModel.history.canUndo)
+            .accessibilityLabel(Text("Undo"))
+            barButton(icon: DrawingIcons.redo, tint: viewModel.history.canRedo ? palette.onSurface : palette.onSurfaceMuted) {
+                viewModel.redo()
+            }
+            .disabled(!viewModel.history.canRedo)
+            .accessibilityLabel(Text("Redo"))
             barButton(icon: "minus", tint: palette.onSurface) {
                 viewModel.onCanvasIntent(commands.zoomOut())
             }
@@ -233,7 +252,7 @@ struct MasterEditorScreen: View {
                 viewModel.onCanvasIntent(commands.zoomToFit())
             }
             toolButtons
-            barButton(icon: DrawingIcons.draw, tint: palette.onSurface) {
+            barButton(icon: DrawingIcons.draw, tint: viewModel.drawing.isOverlayActive() ? palette.accent : palette.onSurface) {
                 viewModel.toggleDrawingOverlay()
             }
             barButton(icon: "plus.square.on.square", tint: palette.accent) {
@@ -294,6 +313,14 @@ struct MasterEditorScreen: View {
                 sheet = opened
             }
         }
+    }
+}
+
+private struct MasterBarHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

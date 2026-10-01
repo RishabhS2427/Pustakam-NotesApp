@@ -7,6 +7,7 @@ import com.app.pustakam.core.drawing.model.DrawBlend
 import com.app.pustakam.core.drawing.model.DrawBrush
 import com.app.pustakam.core.drawing.model.DrawBrushKind
 import com.app.pustakam.core.drawing.model.DrawColor
+import com.app.pustakam.core.drawing.model.DrawCut
 import com.app.pustakam.core.drawing.model.DrawDocument
 import com.app.pustakam.core.drawing.model.DrawElement
 import com.app.pustakam.core.drawing.model.DrawElementKind
@@ -39,6 +40,8 @@ object DrawCodec {
 
     const val VERSION = 1
 
+    const val TOOLBOX_VERSION = 2
+
     fun version(): Int = VERSION
 
     fun encode(document: DrawDocument): String = documentJson(document).toString()
@@ -57,7 +60,7 @@ object DrawCodec {
 
     fun encodeToolbox(settings: DrawToolSettings, colors: DrawColorState): String = JsonObject(
         linkedMapOf(
-            "v" to JsonPrimitive(VERSION),
+            "v" to JsonPrimitive(TOOLBOX_VERSION),
             "brushKind" to JsonPrimitive(settings.brushKind.name),
             "brushes" to JsonArray(settings.brushes.map { brushJson(it) }),
             "eraserKind" to JsonPrimitive(settings.eraserKind.name),
@@ -80,7 +83,11 @@ object DrawCodec {
             fallback.copy(
                 brushKind = enumOf(root.string("brushKind"), fallback.brushKind),
                 brushes = fallback.brushes.map { preset -> brushes.firstOrNull { it.kind == preset.kind } ?: preset },
-                eraserKind = enumOf(root.string("eraserKind"), fallback.eraserKind),
+                eraserKind = if (root.int("v", 0) >= TOOLBOX_VERSION) {
+                    enumOf(root.string("eraserKind"), fallback.eraserKind)
+                } else {
+                    fallback.eraserKind
+                },
                 eraserSize = root.float("eraserSize", fallback.eraserSize),
                 shapeKind = enumOf(root.string("shapeKind"), fallback.shapeKind),
                 shapes = root.array("shapes").mapNotNull { (it as? JsonObject)?.let { shape -> shapeOf(shape) } }
@@ -208,7 +215,21 @@ object DrawCodec {
         )
         element.anchorId?.let { fields["a"] = JsonPrimitive(it) }
         if (element.kind == DrawElementKind.SHAPE) fields["sh"] = shapeJson(element.shape)
+        if (element.isCut) fields["cut"] = JsonArray(element.cuts.map { cutJson(it) })
         return JsonObject(fields)
+    }
+
+    private fun cutJson(cut: DrawCut): JsonObject = JsonObject(
+        linkedMapOf(
+            "p" to JsonPrimitive(DrawPointCodec.encode(cut.points)),
+            "r" to number(cut.radius)
+        )
+    )
+
+    private fun cutOf(json: JsonObject): DrawCut? {
+        val points = DrawPointCodec.decode(json.string("p").orEmpty())
+        val radius = json.float("r", 0f)
+        return if (points.isEmpty() || radius <= 0f) null else DrawCut(points, radius)
     }
 
     private fun elementOf(json: JsonObject): DrawElement? {
@@ -230,7 +251,8 @@ object DrawCodec {
             order = json.double("o", 0.0),
             author = json.string("au").orEmpty(),
             clock = json.long("c", 0L),
-            seed = json.int("s", 0)
+            seed = json.int("s", 0),
+            cuts = json.array("cut").mapNotNull { (it as? JsonObject)?.let { cut -> cutOf(cut) } }
         )
     }
 

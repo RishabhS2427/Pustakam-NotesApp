@@ -13,6 +13,9 @@ import com.app.pustakam.core.common.util.ContentType
 import com.app.pustakam.core.filesys.mime.MimeCatalog
 import com.app.pustakam.core.filesys.naming.FileNameGenerator.suggestedFileNameFromMedia
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -46,6 +49,11 @@ fun deleteFile(filePath : String){
     if (file.exists() && file.isFile) {
         file.delete()
     }
+}
+
+fun deleteFilesLater(paths: List<String>) {
+    if (paths.isEmpty()) return
+    CoroutineScope(Dispatchers.IO).launch { paths.forEach { runCatching { deleteFile(it) } } }
 }
 private const val THUMBNAIL_MAX_DIMENSION = 512
 

@@ -23,7 +23,10 @@ class NoteEditorViewModel: ObservableObject {
         contents: { [weak self] in self?.state.noteContents ?? [] },
         noteId: { [weak self] in self?.state.note?.id },
         documentId: { nil },
-        onWrite: { [weak self] in self?.addContentData(content: $0) }
+        onWrite: { [weak self] content in
+            guard let self else { return }
+            self.edit(NoteEditKind.drawing) { self.addContentData(content: content) }
+        }
     )
 
     private var drawingChanges = Set<AnyCancellable>()
@@ -36,6 +39,9 @@ class NoteEditorViewModel: ObservableObject {
     // ✍️ 23-Sep-2026 — a deleted row leaves no dirty id behind, so remember the note changed anyway
     private var structureChanged = false
     private var autoSaveTimer: Timer?
+    private var editDepth = 0
+    private var editStart: Note?
+    private var trashedFiles = Set<String>()
 
     @Published private(set) var history = NoteHistory(
         past: [],
@@ -49,29 +55,57 @@ class NoteEditorViewModel: ObservableObject {
 
     private func currentSnapshot() -> Note? {
         guard let note = state.note else { return nil }
-        return note.withTitleAndContents(newTitle: state.title, newContents: state.noteContents)
+        return NoteSnapshots.shared.noteEditor(note: note, title: state.title, contents: state.noteContents)
     }
 
-    private func restore(_ note: Note) {
-        state.note = note
+    @discardableResult
+    private func edit<T>(_ kind: NoteEditKind, _ block: () -> T) -> T {
+        if editDepth == 0 { editStart = currentSnapshot() }
+        editDepth += 1
+        defer {
+            editDepth -= 1
+            if editDepth == 0 {
+                history = history.track(start: editStart, end: currentSnapshot(), kind: kind)
+                editStart = nil
+            }
+        }
+        return block()
+    }
+
+    private func restore(_ step: NoteHistoryStep) {
+        history = step.history
+        let note = step.note
+        let restored = state.note?.withTitleAndContents(newTitle: note.title, newContents: note.contents) ?? note
+        state.note = restored
         state.title = note.title ?? ""
-        state.noteContents = note.contents as? [NoteContentModel] ?? []
-        state.noteContents.forEach { dirtyContentIds.insert($0.id) }
-        contentBridge.setSelectedNote(note: note)
+        state.noteContents = note.contents
+        dirtyContentIds.formUnion(step.dirtyIds)
+        step.removed.forEach(discard)
+        contentBridge.setSelectedNote(note: restored)
+    }
+
+    private func discard(_ content: NoteContentModel) {
+        structureChanged = true
+        dirtyContentIds.remove(content.id)
+        trashedFiles.formUnion(NoteFiles.shared.pathsOf(content: content))
+        adapter.deleteNoteContent(contentId: content.id) { [weak self] result in
+            if case .failure(let error) = result {
+                self?.state.errorMessage = error.message
+                print("deleteContent failed [\(error.code)] \(error.message)")
+            }
+        }
     }
 
     func undo() {
         guard let current = currentSnapshot(),
               let step = history.undoStep(current: current) else { return }
-        history = step.history
-        restore(step.note)
+        restore(step)
     }
 
     func redo() {
         guard let current = currentSnapshot(),
               let step = history.redoStep(current: current) else { return }
-        history = step.history
-        restore(step.note)
+        restore(step)
     }
 
     /// DI per series convention: defaults keep call sites/tests simple. (fixes E1, E6)
@@ -91,6 +125,7 @@ class NoteEditorViewModel: ObservableObject {
         contentUpdatesHandle?.close()
         contentSyncHandle?.close()
         contentBridge.dispose()
+        deleteFilesLater(NoteFiles.shared.discardable(trashed: trashedFiles, live: state.noteContents))
     }
 
     private func observeDrawing() {
@@ -104,16 +139,18 @@ class NoteEditorViewModel: ObservableObject {
     }
 
     func addDrawingPage(width: Float, height: Float) {
-        guard let note = state.note else { return }
-        let content = DrawNoteContents.shared.create(
-            noteId: note.id,
-            position: Double(state.noteContents.count),
-            surface: DrawCommands.shared.pageSurface(),
-            width: width,
-            height: height
-        )
-        updateContent(content: content)
-        drawing.open(content)
+        edit(NoteEditKind.drawing) {
+            guard let note = state.note else { return }
+            let content = DrawNoteContents.shared.create(
+                noteId: note.id,
+                position: Double(state.noteContents.count),
+                surface: DrawCommands.shared.pageSurface(),
+                width: width,
+                height: height
+            )
+            updateContent(content: content)
+            drawing.open(content)
+        }
     }
 
     func addContentData(content: NoteContentModel) {
@@ -128,10 +165,12 @@ class NoteEditorViewModel: ObservableObject {
     private func observeContentUpdates() {
         contentUpdatesHandle = contentBridge.observeSelectedMedia { [weak self] media in
             guard let self else { return }
-            for updated in media {
-                guard let index = self.state.noteContents.firstIndex(where: { $0.id == updated.id }) else { continue }
-                guard self.state.noteContents[index].updatedAt != updated.updatedAt else { continue }
-                self.state.noteContents[index] = updated
+            self.edit(NoteEditKind.sync) {
+                for updated in media {
+                    guard let index = self.state.noteContents.firstIndex(where: { $0.id == updated.id }) else { continue }
+                    guard self.state.noteContents[index].updatedAt != updated.updatedAt else { continue }
+                    self.state.noteContents[index] = updated
+                }
             }
         }
     }
@@ -207,28 +246,26 @@ class NoteEditorViewModel: ObservableObject {
     }
 
     func updateContent(content: NoteContentModel) {
-        if let snapshot = currentSnapshot() {
-            history = content is NoteContentModel.TextContent
-                ? history.recordText(previous: snapshot)
-                : history.recordAddMedia(previous: snapshot)
-        }
-        dirtyContentIds.insert(content.id)   // 🔧 15-Jul-2026 iOS parity: touched → will be saved
-        if let index = state.noteContents.firstIndex(where: { $0.id == content.id }) {
-            state.noteContents[index] = content
-        } else {
-            addContent(content: content)
+        edit(content is NoteContentModel.TextContent ? NoteEditKind.text : NoteEditKind.addMedia) {
+            dirtyContentIds.insert(content.id)   // 🔧 15-Jul-2026 iOS parity: touched → will be saved
+            if let index = state.noteContents.firstIndex(where: { $0.id == content.id }) {
+                state.noteContents[index] = content
+            } else {
+                addContent(content: content)
+            }
         }
         // NOTE: no more parallel note.contents bookkeeping (E4) — save() materializes.
     }
 
     func addNewText() {
-        if let snapshot = currentSnapshot() { history = history.recordAddText(previous: snapshot) }
-        guard let noteId = state.note?.id else { return }       // fixes E3 (was note!.id)
-        let text = NoteContentObjectHelper.shared.createText(
-            noteId: noteId,
-            positionedAt: Double(state.noteContents.count),     // 🔧 C4: position is Double now
-            text: "")
-        addContent(content: text)
+        edit(NoteEditKind.addText) {
+            guard let noteId = state.note?.id else { return }       // fixes E3 (was note!.id)
+            let text = NoteContentObjectHelper.shared.createText(
+                noteId: noteId,
+                positionedAt: Double(state.noteContents.count),     // 🔧 C4: position is Double now
+                text: "")
+            addContent(content: text)
+        }
     }
 
     private func editorState() -> EditorState {
@@ -243,6 +280,14 @@ class NoteEditorViewModel: ObservableObject {
     }
 
     func onEditorIntent(_ intent: any EditorIntent) {
+        if EditorCommands.shared.isPassive(intent: intent) {
+            edit(NoteEditKind.sync) { reduceEditor(intent) }
+        } else {
+            reduceEditor(intent)
+        }
+    }
+
+    private func reduceEditor(_ intent: any EditorIntent) {
         let commands = EditorCommands.shared
         let before = editorState()
         let next = commands.reduce(state: before, intent: intent)
@@ -287,7 +332,9 @@ class NoteEditorViewModel: ObservableObject {
             noteId: noteId,
             positionedAt: Double(state.noteContents.count)
         ) else { return }
-        onEditorIntent(EditorCommands.shared.addContent(content: content))
+        edit(NoteEditKind.addMedia) {
+            onEditorIntent(EditorCommands.shared.addContent(content: content))
+        }
         onEditorIntent(EditorCommands.shared.captureFinished())
     }
 
@@ -342,7 +389,9 @@ class NoteEditorViewModel: ObservableObject {
                     self.state.errorMessage = "Couldn't import the selected files."
                     return
                 }
-                self.onEditorIntent(EditorCommands.shared.addContents(contents: items))
+                self.edit(NoteEditKind.addMedia) {
+                    self.onEditorIntent(EditorCommands.shared.addContents(contents: items))
+                }
             }
         }
     }
@@ -361,7 +410,9 @@ class NoteEditorViewModel: ObservableObject {
             self.state.isLoading = false
             switch result {
             case .success(let items):
-                self.onEditorIntent(EditorCommands.shared.addContents(contents: items))
+                self.edit(NoteEditKind.addMedia) {
+                    self.onEditorIntent(EditorCommands.shared.addContents(contents: items))
+                }
             case .noFileFound:
                 self.state.errorMessage = "No file found at this link."
             case .failed(let message):
@@ -373,7 +424,19 @@ class NoteEditorViewModel: ObservableObject {
 
     // MARK: - Save / Delete
     func saveThenOpen(onSaved: @escaping () -> Void) {
-        guard !state.isDeleted, let note = state.note, !state.noteContents.isEmpty else {
+        guard !state.isDeleted, state.note != nil, !state.noteContents.isEmpty else {
+            onSaved(); return
+        }
+        persist(onSaved: onSaved)
+    }
+
+    func openWorkspace(onReady: @escaping (String) -> Void) {
+        guard !state.isDeleted, let noteId = state.note?.id else { return }
+        persist { onReady(noteId) }
+    }
+
+    private func persist(onSaved: @escaping () -> Void) {
+        guard let note = state.note else {
             onSaved(); return
         }
         let toSave = note.withTitleAndContents(newTitle: state.title, newContents: state.noteContents)
@@ -482,34 +545,13 @@ class NoteEditorViewModel: ObservableObject {
         adapter.deleteNote(noteId: noteId , onState: { _ in })
     }
     func deleteContent(contentId: String) {
-        if let snapshot = currentSnapshot() {
-            history = history.recordDeleteContent(previous: snapshot)
+        edit(NoteEditKind.deleteContent) {
+            guard let content = state.noteContents.first(where: { $0.id == contentId }) else { return }
+            let doomed = [content] + DrawNoteContents.shared.dependentsOf(contents: state.noteContents, removedId: contentId)
+            doomed.forEach(discard)
+            let ids = Set(doomed.map { $0.id })
+            state.noteContents.removeAll { ids.contains($0.id) }
         }
-        dirtyContentIds.remove(contentId)   // 🔧 15-Jul-2026 iOS parity: deleted → nothing to save
-        structureChanged = true   // ✍️ the row is gone; nothing dirty is left to prove the note changed
-        guard let content = state.noteContents.first(where: { $0.id == contentId }) else { return }
-
-        // 1. remove local media file (image/video/audio) — safe no-op for text
-        if content.isMediaFile(), let media = content as? NoteContentModel.MediaContent,
-           let localPath = media.localPath {
-            deleteFile(filePath: LocalFilePathResolver_iosKt.resolveLocalFilePath(path: localPath) ?? localPath)
-            // thumbnail lives in Documents/thumbnails — remove it with its media
-            if let thumb = LocalFilePathResolver_iosKt.resolveLocalFilePath(path: media.thumbnailPath) {
-                deleteFile(filePath: thumb)
-            }
-        }
-
-        // 2. remove from DB (write call — survives screen death, like saveNote)
-        adapter.deleteNoteContent(contentId: contentId) { [weak self] result in
-            if case .failure(let error) = result {
-                self?.state.errorMessage = error.message
-                print("deleteContent failed [\(error.code)] \(error.message)")
-            }
-        }
-
-        // 3. remove from UI state — save() materializes contents from this list,
-        //    so the deleted block can never come back on the next save
-        state.noteContents.removeAll { $0.id == contentId }
     }
 
     func shareNote() {}     // stub kept (nothing deleted)

@@ -165,6 +165,7 @@
 		D7A0C0DE0000000000000111 /* NoteDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000110 /* NoteDrawing.swift */; };
 		D7A0C0DE0000000000000113 /* BookReaderAnnotations.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000112 /* BookReaderAnnotations.swift */; };
 		D7A0C0DE0000000000000115 /* DrawingBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000114 /* DrawingBlockView.swift */; };
+		D7A0C0DE0000000000000118 /* ImageAnnotationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000117 /* ImageAnnotationViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -361,6 +362,7 @@
 		D7A0C0DE0000000000000110 /* NoteDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteDrawing.swift; sourceTree = "<group>"; };
 		D7A0C0DE0000000000000112 /* BookReaderAnnotations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookReaderAnnotations.swift; sourceTree = "<group>"; };
 		D7A0C0DE0000000000000114 /* DrawingBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingBlockView.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000117 /* ImageAnnotationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAnnotationViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -938,6 +940,7 @@
 			isa = PBXGroup;
 			children = (
 				2287BB28300D69F800F6D3E2 /* ImagePreviewView.swift */,
+				D7A0C0DE0000000000000117 /* ImageAnnotationViewModel.swift */,
 				63CFB9212DB7107D00093C96 /* CardImageEditor.swift */,
 				63D089222CAC870A008FD8CC /* AvatarImageView.swift */,
 			);
@@ -1310,6 +1313,7 @@
 				6315C6322DBA649F00796C7E /* MediaManager.swift in Sources */,
 				22A0ABB9301B419400B2817C /* OrientationManager.swift in Sources */,
 				2287BB29300D69F800F6D3E2 /* ImagePreviewView.swift in Sources */,
+				D7A0C0DE0000000000000118 /* ImageAnnotationViewModel.swift in Sources */,
 				63C00BE92CEC945900A4907C /* RulledPage.swift in Sources */,
 				63C00BEF2CECC6FF00A4907C /* ActionButton.swift in Sources */,
 				2287BB44301014C500F6D3E2 /* QuickActionCard.swift in Sources */,

@@ -11,13 +11,24 @@ import com.app.pustakam.core.drawing.model.DrawBlend
 import com.app.pustakam.core.drawing.model.DrawColor
 import com.app.pustakam.core.drawing.model.DrawElement
 import com.app.pustakam.core.drawing.model.DrawElementKind
+import com.app.pustakam.core.drawing.model.DrawPoint
+import com.app.pustakam.core.richtext.master.model.CanvasRect
 
 object DrawRenderer {
 
-    fun itemsFor(element: DrawElement, complete: Boolean): List<DrawRenderItem> = when (element.kind) {
-        DrawElementKind.STROKE -> strokeItems(element, complete)
-        DrawElementKind.ERASE -> eraseItems(element)
-        DrawElementKind.SHAPE -> shapeItems(element)
+    fun itemsFor(element: DrawElement, complete: Boolean): List<DrawRenderItem> {
+        val items = when (element.kind) {
+            DrawElementKind.STROKE -> strokeItems(element, complete)
+            DrawElementKind.ERASE -> eraseItems(element)
+            DrawElementKind.SHAPE -> shapeItems(element)
+        }
+        if (!element.isCut || items.isEmpty() || element.isErase) return items
+        val cuts = element.cuts.mapIndexedNotNull { index, cut ->
+            clearItem("${element.renderKey}$CUT_SUFFIX$index", cut.points, cut.radius * 2f, element.bounds)
+        }
+        val area = element.bounds.inflated(element.brush.size * GROUP_SLACK)
+        return listOf(DrawRenderItem.groupBegin(element.renderKey + GROUP_SUFFIX, area)) +
+            items + cuts + DrawRenderItem.groupEnd(element.renderKey + END_SUFFIX, area)
     }
 
     private fun strokeItems(element: DrawElement, complete: Boolean): List<DrawRenderItem> {
@@ -55,34 +66,32 @@ object DrawRenderer {
         return listOf(item)
     }
 
-    private fun eraseItems(element: DrawElement): List<DrawRenderItem> {
-        val points = element.points
-        if (points.isEmpty()) return emptyList()
+    private fun eraseItems(element: DrawElement): List<DrawRenderItem> =
+        listOfNotNull(clearItem(element.renderKey, element.points, element.brush.size, element.bounds))
+
+    private fun clearItem(key: String, points: List<DrawPoint>, width: Float, bounds: CanvasRect): DrawRenderItem? {
+        if (points.isEmpty()) return null
         if (points.size == 1) {
-            return listOf(
-                DrawRenderItem.fill(
-                    key = element.renderKey,
-                    path = DrawStrokeOutline.dot(points.first(), element.brush.size / 2f),
-                    color = DrawColor.BLACK,
-                    opacity = 1f,
-                    blend = DrawBlend.CLEAR,
-                    bounds = element.bounds
-                )
+            return DrawRenderItem.fill(
+                key = key,
+                path = DrawStrokeOutline.dot(points.first(), width / 2f),
+                color = DrawColor.BLACK,
+                opacity = 1f,
+                blend = DrawBlend.CLEAR,
+                bounds = bounds
             )
         }
         val path = DrawPathBuilder().smoothThrough(points.map { DrawVec(it.x, it.y) }, connect = false).build()
-        return listOf(
-            DrawRenderItem.stroke(
-                key = element.renderKey,
-                path = path,
-                color = DrawColor.BLACK,
-                opacity = 1f,
-                width = element.brush.size,
-                cap = DrawCap.ROUND,
-                join = DrawJoin.ROUND,
-                blend = DrawBlend.CLEAR,
-                bounds = element.bounds
-            )
+        return DrawRenderItem.stroke(
+            key = key,
+            path = path,
+            color = DrawColor.BLACK,
+            opacity = 1f,
+            width = width,
+            cap = DrawCap.ROUND,
+            join = DrawJoin.ROUND,
+            blend = DrawBlend.CLEAR,
+            bounds = bounds
         )
     }
 
@@ -113,6 +122,14 @@ object DrawRenderer {
     }
 
     private const val STROKE_SUFFIX = ":stroke"
+
+    private const val CUT_SUFFIX = ":cut"
+
+    private const val GROUP_SLACK = 2f
+
+    private const val GROUP_SUFFIX = ":group"
+
+    private const val END_SUFFIX = ":end"
 
     private const val FILL_SUFFIX = ":fill"
 }

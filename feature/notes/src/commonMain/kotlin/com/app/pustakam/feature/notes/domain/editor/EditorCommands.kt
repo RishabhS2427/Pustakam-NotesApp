@@ -80,6 +80,8 @@ object EditorCommands {
     fun reduce(state: EditorState, intent: EditorIntent): EditorState =
         EditorReducer.reduce(state, intent)
 
+    fun isPassive(intent: EditorIntent): Boolean = EditorReducer.isPassive(intent)
+
     fun effects(
         before: EditorState,
         next: EditorState,

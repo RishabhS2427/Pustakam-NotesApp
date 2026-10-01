@@ -39,4 +39,16 @@ object DrawToolRegistry {
     fun handler(id: DrawToolId): DrawToolHandler? = handlers[id]
 
     fun isAvailable(id: DrawToolId, mode: DrawToolMode): Boolean = specsFor(mode).any { it.id == id }
+
+    fun erasersFor(mode: DrawToolMode): List<DrawEraserKind> =
+        if (mode == DrawToolMode.ADVANCED) advancedErasers else basicErasers
+
+    fun fitted(settings: DrawToolSettings, mode: DrawToolMode): DrawToolSettings {
+        val erasers = erasersFor(mode)
+        return if (settings.eraserKind in erasers) settings else settings.withEraserKind(erasers.first())
+    }
+
+    private val basicErasers = listOf(DrawEraserKind.PARTIAL, DrawEraserKind.OBJECT)
+
+    private val advancedErasers = basicErasers + listOf(DrawEraserKind.STROKE, DrawEraserKind.PIXEL)
 }

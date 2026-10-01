@@ -12,6 +12,7 @@ struct NoteEditorView: View {
     @State private var readerPrefs = ReaderPrefsAdapter()
     // 🔧 20-Jul-2026: NEW — path of the image shown in the full-screen preview (nil = hidden)
     @State private var previewImagePath: String? = nil
+    @State private var previewMediaId: String? = nil
     // 🔧 20-Jul-2026: NEW FEATURE (export) — format chooser + spinner while generating
     @State private var showExportOptions = false
     @State private var isExporting = false
@@ -41,11 +42,8 @@ struct NoteEditorView: View {
                     fontWeight: .bold
                 ).frame(minHeight: 20, maxHeight:.infinity)
                     ForEach(noteEditorViewModel.state.noteContents){ noteContent in
-                        renderWidget(content: noteContent){
-                            updatedContent in
-                            noteEditorViewModel.updateContent(content: updatedContent)
-                        }
-                        .noteInkRow(noteContent.id)
+                        contentRow(noteContent)
+                            .noteInkRow(noteContent.id)
                     }
                     // 🔧 07-Aug-2026 — room so the caret clears the keyboard accessory toolbar
                     Color.clear.frame(height: 80)
@@ -116,7 +114,11 @@ struct NoteEditorView: View {
             set: { if !$0 { previewImagePath = nil } }
         )) {
             if let path = previewImagePath {
-                ImagePreviewView(path: path) { previewImagePath = nil }
+                ImagePreviewView(
+                    path: path,
+                    noteId: noteEditorViewModel.state.note?.id,
+                    mediaId: previewMediaId
+                ) { previewImagePath = nil }
             }
         }
         .confirmationDialog("Export note", isPresented: $showExportOptions, titleVisibility: .visible) {
@@ -149,12 +151,10 @@ struct NoteEditorView: View {
                     }, tint: overlayActive ? Theme.Colors.primary : Theme.Colors.secondary)
                     ActionButtonWithoutBackground(iconName: "workspace",
                                                   action: {
-                        if let noteId = noteEditorViewModel.state.note?.id {
-                            // flush first: the canvas reads the note from the db on open,
-                            // so navigating before the write lands shows stale text
-                            noteEditorViewModel.saveThenOpen {
-                                router.navigate(to: .MasterEditor(noteId: noteId))
-                            }
+                        // flush first: the canvas reads the note from the db on open,
+                        // so navigating before the write lands shows stale text
+                        noteEditorViewModel.openWorkspace { noteId in
+                            router.navigate(to: .MasterEditor(noteId: noteId))
                         }
                     }, tint: Theme.Colors.secondary)
                     
@@ -207,7 +207,31 @@ struct NoteEditorView: View {
     
     
     @ViewBuilder
-    func renderWidget(content : NoteContentModel, onUpdate :  @escaping (NoteContentModel)-> Void ) -> some View {
+    private func contentRow(_ content: NoteContentModel) -> some View {
+        let notes = DrawNoteContents.shared
+        let contents = noteEditorViewModel.state.noteContents
+        if notes.showsWithOriginal(contents: contents, content: content) {
+            EmptyView()
+        } else if let copy = notes.editedCopyOf(contents: contents, imageId: content.id) {
+            HStack(alignment: .top, spacing: Self.pairedSpacing) {
+                renderWidget(content: content, paired: true) { noteEditorViewModel.updateContent(content: $0) }
+                renderWidget(content: copy, paired: true) { noteEditorViewModel.updateContent(content: $0) }
+            }
+        } else {
+            renderWidget(content: content) { noteEditorViewModel.updateContent(content: $0) }
+        }
+    }
+
+    private static let pairedSpacing: CGFloat = 8
+
+    private static let pairedGutter: CGFloat = 32
+
+    private static let pairedAspect: CGFloat = 1.5
+
+    private var pairedWidth: CGFloat { (UIScreen.main.bounds.width - Self.pairedGutter) / 2 }
+
+    @ViewBuilder
+    func renderWidget(content : NoteContentModel, paired: Bool = false, onUpdate :  @escaping (NoteContentModel)-> Void ) -> some View {
       
         switch content.type {
             case .text:
@@ -224,12 +248,15 @@ struct NoteEditorView: View {
             case .image :
                 let contentImage = content as! NoteContentModel.MediaContent
             CardImageEditor(content: contentImage, actionClick: {
+                previewMediaId = contentImage.id
                 previewImagePath = contentImage.getMediaUrl()
             },actionDelete: {
                 askDeleteContent(contentId: contentImage.id, kind: "Image")
             }, actionSave: {
                 saveMediaToDevice(media: contentImage)
-            }
+            },
+                cardWidth: paired ? pairedWidth : 260,
+                cardHeight: paired ? pairedWidth * Self.pairedAspect : 390
                  )
 
             case .video:
@@ -306,9 +333,6 @@ struct NoteEditorView: View {
     private var drawingChrome: some View {
         if let session = noteEditorViewModel.drawing.active() {
             DrawingChrome(session: session, onDone: { noteEditorViewModel.drawing.stop() })
-                .padding(.horizontal, 12)
-                .padding(.bottom, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
     }
 

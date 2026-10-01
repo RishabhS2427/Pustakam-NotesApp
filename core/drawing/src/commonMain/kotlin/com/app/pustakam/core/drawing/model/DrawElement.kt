@@ -7,6 +7,8 @@ import com.app.pustakam.core.richtext.master.model.CanvasRect
 
 enum class DrawElementKind { STROKE, SHAPE, ERASE }
 
+data class DrawCut(val points: List<DrawPoint>, val radius: Float)
+
 data class DrawElement(
     val id: String,
     val kind: DrawElementKind,
@@ -19,7 +21,8 @@ data class DrawElement(
     val order: Double,
     val author: String,
     val clock: Long,
-    val seed: Int
+    val seed: Int,
+    val cuts: List<DrawCut> = emptyList()
 ) {
     val reach: Float get() = brush.size * REACH_FACTOR
 
@@ -44,6 +47,8 @@ data class DrawElement(
 
     val isErase: Boolean get() = kind == DrawElementKind.ERASE
 
+    val isCut: Boolean get() = cuts.isNotEmpty()
+
     val renderKey: String get() = "$id@$clock"
 
     fun withPoints(value: List<DrawPoint>): DrawElement = copy(points = value)
@@ -55,6 +60,8 @@ data class DrawElement(
     fun withOrder(value: Double): DrawElement = copy(order = value)
 
     fun withColor(value: DrawColor): DrawElement = copy(color = value)
+
+    fun withCuts(value: List<DrawCut>): DrawElement = copy(cuts = value)
 
     fun wins(other: DrawElement): Boolean =
         clock > other.clock || (clock == other.clock && author > other.author)

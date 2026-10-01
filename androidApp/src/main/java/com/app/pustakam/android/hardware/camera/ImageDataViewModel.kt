@@ -116,14 +116,15 @@ class ImageDataViewModel : ViewModel(), KoinComponent {
         }
         clearRecording()
     }
-    fun onSetMediaToPreview(fileUrl: String, contentType: ContentType, mediaId: String? = null) {
+    fun onSetMediaToPreview(fileUrl: String, contentType: ContentType, mediaId: String? = null, noteId: String? = null) {
+        if (noteId != null) _mediaFileState.update { it.copy(noteId = noteId) }
         if (fileUrl.isUrl()) {
             //todo handle later api call
         } else {
             when {
                 contentType == ContentType.IMAGE -> viewModelScope.launch(Dispatchers.IO) {
                     val bitmap = fileUrl.toBitmap()
-                    onTakenPhotoPreview(bitmap, dataStateEvent = DataStateEvent.Saved)
+                    onTakenPhotoPreview(bitmap, dataStateEvent = DataStateEvent.Saved, mediaId = mediaId)
                 }
                 contentType == ContentType.VIDEO -> onVideoFullPreview(fileUrl, mediaId = mediaId)
             }
@@ -136,9 +137,9 @@ class ImageDataViewModel : ViewModel(), KoinComponent {
             it.copy(mediaFilePath=fileUrl,dataStateEvent = dataStateEvent, contentType = ContentType.VIDEO, mediaId = mediaId)
         }
     }
-    fun onTakenPhotoPreview(bitmap: Bitmap,dataStateEvent: DataStateEvent = DataStateEvent.Editing) {
+    fun onTakenPhotoPreview(bitmap: Bitmap,dataStateEvent: DataStateEvent = DataStateEvent.Editing, mediaId: String? = null) {
         _mediaFileState.update {
-            it.copy(bitmap = bitmap, editedBitmap = bitmap, dataStateEvent = dataStateEvent, contentType = ContentType.IMAGE)
+            it.copy(bitmap = bitmap, editedBitmap = bitmap, dataStateEvent = dataStateEvent, contentType = ContentType.IMAGE, mediaId = mediaId)
         }
     }
     private fun saveImage(file: File) {

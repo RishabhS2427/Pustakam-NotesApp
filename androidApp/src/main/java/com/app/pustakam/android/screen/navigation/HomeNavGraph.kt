@@ -125,7 +125,7 @@ fun NavGraphBuilder.HomeNavGraph(navController: PustakmNavController){
                     navController.navigateTo(Route.BookReader + "/$noteId?contentId=${media.id}")
                 },
                 onOpenMedia = { media ->
-                    imageViewModel.onSetMediaToPreview(media.getMediaUrl(), media.type, mediaId = media.id)
+                    imageViewModel.onSetMediaToPreview(media.getMediaUrl(), media.type, mediaId = media.id, noteId = media.noteId)
                     when  {
                         media.type.isImage() -> navController.navigateTo(Route.ImagePreview)
                         media.type == ContentType.VIDEO -> navController.navigateTo(Route.VideoPreview)

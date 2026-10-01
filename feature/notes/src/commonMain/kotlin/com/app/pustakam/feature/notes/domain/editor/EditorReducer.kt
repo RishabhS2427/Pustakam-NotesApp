@@ -117,10 +117,7 @@ object EditorReducer {
         is EditorIntent.ThumbnailReady -> saveOnly(next)
 
         is EditorIntent.RemoveContent -> {
-            val removed = before.contentById(intent.contentId)
-            val media = removed as? NoteContentModel.MediaContent
-            val paths = listOfNotNull(media?.localPath, media?.thumbnailPath)
-                .filter { it.isNotEmpty() }
+            val paths = NoteFiles.pathsOf(before.contentById(intent.contentId))
             listOf(EditorEffect.DeleteContentRow(intent.contentId)) +
                 (if (paths.isEmpty()) emptyList() else listOf(EditorEffect.DeleteFiles(paths))) +
                 saveOnly(next)
@@ -149,6 +146,9 @@ object EditorReducer {
 
         else -> emptyList()
     }
+
+    fun isPassive(intent: EditorIntent): Boolean =
+        intent is EditorIntent.ExternalContentsChanged || intent is EditorIntent.ThumbnailReady
 
     // 🎧 audio/video whose local file just appeared — the player still holds the old empty path, so play did nothing
     private fun landedPlayableMedia(before: EditorState, next: EditorState): List<EditorEffect> =

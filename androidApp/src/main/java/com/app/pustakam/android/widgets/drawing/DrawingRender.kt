@@ -26,6 +26,7 @@ import com.app.pustakam.core.drawing.render.DrawCap
 import com.app.pustakam.core.drawing.render.DrawJoin
 import com.app.pustakam.core.drawing.render.DrawRenderEntry
 import com.app.pustakam.core.drawing.render.DrawRenderItem
+import com.app.pustakam.core.richtext.master.model.CanvasRect
 import java.util.IdentityHashMap
 import kotlin.math.roundToInt
 
@@ -89,23 +90,30 @@ fun drawingPathOf(data: FloatArray): Path {
 
 fun DrawScope.drawEntries(entries: List<DrawRenderEntry>, paths: DrawingPathCache?) {
     val currentDensity = density
+    val canvas = drawContext.canvas
     for (entry in entries) {
         val item = entry.item
-        withTransform({ transform(entry.matrix.toCompose(currentDensity)) }) {
-            if (DrawCommands.isDabs(item)) {
-                drawDabs(item)
-            } else {
-                val path = paths?.pathOf(item) ?: drawingPathOf(item.path)
-                val style = if (DrawCommands.isStroke(item)) {
-                    Stroke(width = item.strokeWidth, cap = item.cap.toCompose(), join = item.join.toCompose())
-                } else {
-                    Fill
-                }
-                drawPath(path, color = item.color.toCompose(item.opacity), style = style, blendMode = item.blend.toCompose())
-            }
+        when {
+            DrawCommands.isGroupBegin(item) -> canvas.saveLayer(DrawCommands.groupBounds(entry).toCompose(currentDensity), Paint())
+            DrawCommands.isGroupEnd(item) -> canvas.restore()
+            else -> withTransform({ transform(entry.matrix.toCompose(currentDensity)) }) { drawItem(item, paths) }
         }
     }
     paths?.endFrame()
+}
+
+private fun DrawScope.drawItem(item: DrawRenderItem, paths: DrawingPathCache?) {
+    if (DrawCommands.isDabs(item)) {
+        drawDabs(item)
+        return
+    }
+    val path = paths?.pathOf(item) ?: drawingPathOf(item.path)
+    val style = if (DrawCommands.isStroke(item)) {
+        Stroke(width = item.strokeWidth, cap = item.cap.toCompose(), join = item.join.toCompose())
+    } else {
+        Fill
+    }
+    drawPath(path, color = item.color.toCompose(item.opacity), style = style, blendMode = item.blend.toCompose())
 }
 
 private fun DrawScope.drawDabs(item: DrawRenderItem) {
@@ -147,6 +155,8 @@ private fun DrawScope.drawDabs(item: DrawRenderItem) {
     }
     canvas.restore()
 }
+
+fun CanvasRect.toCompose(density: Float): Rect = Rect(x * density, y * density, right * density, bottom * density)
 
 fun DrawMatrix.toCompose(density: Float): Matrix {
     val matrix = Matrix()

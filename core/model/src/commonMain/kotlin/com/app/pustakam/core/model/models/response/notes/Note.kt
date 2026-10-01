@@ -55,6 +55,8 @@ data class Note(
 
     fun withTitleAndContents(newTitle: String?, newContents: List<NoteContentModel>): Note =
         copy(title = newTitle, contents = newContents, updatedAt = "${getCurrentTimestamp()}", syncStatus = "PENDING")
+
+    fun withCanvas(nodes: List<NoteCanvasNode>?): Note = copy(canvas = nodes)
 }
 
 @Serializable
@@ -143,7 +145,10 @@ sealed class NoteContentModel {
         //   copy and never travels; assetId is what the other device downloads with.
         val assetId: String? = null,
         val checksum: String? = null,
+        val editedFrom: String? = null,
     ) : NoteContentModel() {
+        fun withEditedFrom(originalId: String?): MediaContent = copy(editedFrom = originalId)
+        fun isEditedCopy(): Boolean = !editedFrom.isNullOrEmpty()
         fun withThumbnail(path: String?): MediaContent =
             copy(thumbnailPath = path, updatedAt = "${getCurrentTimestamp()}")
         // 🖼️ 20-Aug-2026 sync: stamped after an upload; updatedAt is NOT touched, because

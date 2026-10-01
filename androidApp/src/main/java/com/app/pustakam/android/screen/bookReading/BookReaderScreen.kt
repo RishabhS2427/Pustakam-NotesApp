@@ -39,6 +39,7 @@ import com.app.pustakam.android.theme.typography
 import com.app.pustakam.android.widgets.LoadingUI
 import com.app.pustakam.android.widgets.SnackBarUi
 import com.app.pustakam.android.widgets.drawing.DrawingChrome
+import com.app.pustakam.android.widgets.drawing.DrawingHistoryButtons
 import com.app.pustakam.android.widgets.drawing.DrawingPageLayer
 import com.app.pustakam.android.widgets.drawing.rememberCapturesTouches
 import com.app.pustakam.core.drawing.note.DrawNoteContents
@@ -148,13 +149,18 @@ fun BookReaderScreen(
         }
         val inkSession = viewModel.drawing.active()
         if (annotating && inkSession != null) {
+            DrawingHistoryButtons(
+                session = inkSession,
+                tint = colorScheme.secondary,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 102.dp)
+            )
             DrawingChrome(
                 session = inkSession,
                 onDone = viewModel.drawing::stop,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    .matchParentSize()
                     .navigationBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 16.dp)
+                    .padding(top = 56.dp)
             )
         }
     }

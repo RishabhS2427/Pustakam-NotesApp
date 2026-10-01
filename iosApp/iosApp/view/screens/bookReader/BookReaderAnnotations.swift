@@ -9,6 +9,8 @@ final class BookReaderAnnotations: ObservableObject {
 
     @Published private(set) var inkCaptures = false
 
+    var onContents: (([NoteContentModel]) -> Void)?
+
     private let adapter: NotesBridgeAdapter
 
     private let contentBridge: NoteContentBridge
@@ -56,6 +58,8 @@ final class BookReaderAnnotations: ObservableObject {
 
     var annotating: Bool { drawing.isOverlayActive() }
 
+    var contents: [NoteContentModel] { note?.contents ?? [] }
+
     var zoomLocked: Bool { annotating && inkCaptures }
 
     func anchorId(_ pageIndex: Int) -> String? {
@@ -68,13 +72,40 @@ final class BookReaderAnnotations: ObservableObject {
         adapter.readNote(noteId: noteId) { [weak self] result in
             guard let self, case .success(let note) = result, let note else { return }
             self.note = note
-            self.drawing.sync(note.contents)
+            self.refresh(note.contents)
         }
         contentsHandle = contentBridge.observeContents(noteId: noteId) { [weak self] contents in
             guard let self else { return }
             self.note = self.note?.withContents(newContents: contents)
-            self.drawing.sync(contents)
+            self.refresh(contents)
         }
+    }
+
+    func target(documentId: String) {
+        guard self.documentId != documentId else { return }
+        self.documentId = documentId
+        drawing.sync(contents)
+    }
+
+    func write(_ content: NoteContentModel) {
+        guard let note else { return }
+        let next = note.withContents(newContents: note.contents.filter { $0.id != content.id } + [content])
+        self.note = next
+        refresh(next.contents)
+        adapter.createOrUpdateNote(note: next, dirtyContentIds: [content.id]) { _ in }
+    }
+
+    func remove(contentId: String) {
+        guard let note else { return }
+        let next = note.withContents(newContents: note.contents.filter { $0.id != contentId })
+        self.note = next
+        refresh(next.contents)
+        adapter.deleteNoteContent(contentId: contentId) { _ in }
+    }
+
+    private func refresh(_ contents: [NoteContentModel]) {
+        drawing.sync(contents)
+        onContents?(contents)
     }
 
     func flushAnnotation() {

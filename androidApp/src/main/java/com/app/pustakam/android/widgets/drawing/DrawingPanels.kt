@@ -131,7 +131,7 @@ private fun DrawingBrushPanel(session: DrawingSession, state: DrawEditorState) {
 private fun DrawingEraserPanel(session: DrawingSession, state: DrawEditorState) {
     DrawingSectionTitle("Eraser")
     DrawingChips(
-        items = DrawCommands.eraserKinds(),
+        items = DrawCommands.eraserKinds(state),
         isSelected = { DrawCommands.isEraser(state, it) },
         label = DrawCommands::eraserLabel,
         onSelect = { session.dispatch(DrawCommands.setEraserKind(it)) }

@@ -11,14 +11,26 @@ final class MasterEditorViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var capabilities = EditorCapabilityCommands.shared.empty()
+    @Published private(set) var history = NoteHistory(
+        past: [],
+        future: [],
+        limit: NoteHistory.companion.DEFAULT_LIMIT
+    )
     @Published var keyboardDismissToken: Int = 0
 
     private(set) lazy var drawing = DrawingHost(
         contents: { [weak self] in self?.noteContents ?? [] },
         noteId: { [weak self] in self?.note?.id },
         documentId: { nil },
-        onWrite: { [weak self] in self?.updateContent($0) }
+        onWrite: { [weak self] content in
+            guard let self else { return }
+            self.edit(NoteEditKind.drawing) { self.updateContent(content) }
+        }
     )
+
+    private var editDepth = 0
+    private var editStart: Note?
+    private var trashedFiles = Set<String>()
 
     private var drawingChanges = Set<AnyCancellable>()
 
@@ -58,9 +70,74 @@ final class MasterEditorViewModel: ObservableObject {
         contentSyncHandle?.close()
         remoteCanvasHandle?.close()
         contentBridge.dispose()
+        deleteFilesLater(NoteFiles.shared.discardable(trashed: trashedFiles, live: noteContents))
     }
 
     func text(for nodeId: String) -> MasterTextState? { texts[nodeId] }
+
+    // MARK: - History
+
+    private func snapshot(_ document: CanvasDocument? = nil) -> Note? {
+        guard let note, canvasReady else { return nil }
+        return NoteSnapshots.shared.masterEditor(note: note, contents: noteContents, document: document ?? canvas.document)
+    }
+
+    @discardableResult
+    private func edit<T>(_ kind: NoteEditKind, _ block: () -> T) -> T {
+        if editDepth == 0 { editStart = snapshot() }
+        editDepth += 1
+        defer {
+            editDepth -= 1
+            if editDepth == 0 {
+                history = history.track(start: editStart, end: snapshot(), kind: kind)
+                editStart = nil
+            }
+        }
+        return block()
+    }
+
+    func undo() {
+        guard let current = snapshot(), let step = history.undoStep(current: current) else { return }
+        travel(step)
+    }
+
+    func redo() {
+        guard let current = snapshot(), let step = history.redoStep(current: current) else { return }
+        travel(step)
+    }
+
+    private func travel(_ step: NoteHistoryStep) {
+        editDepth += 1
+        defer { editDepth -= 1 }
+        history = step.history
+        dirtyContentIds.formUnion(step.dirtyIds)
+        dirtyContentIds.subtract(step.removed.map { $0.id })
+        step.removed.forEach(discard)
+        noteContents = step.note.contents
+        if let document = NoteSnapshots.shared.canvasOf(snapshot: step.note), document != canvas.document {
+            dispatchCanvas(commands.replaceDocument(document: document), housekeeping: false)
+        }
+        rebuildTexts(changed: step.dirtyIds)
+        onEditorIntent(EditorCommands.shared.saveRequested())
+    }
+
+    private func discard(_ content: NoteContentModel) {
+        trashedFiles.formUnion(NoteFiles.shared.pathsOf(content: content))
+        adapter.deleteNoteContent(contentId: content.id) { _ in }
+    }
+
+    private func rebuildTexts(changed: Set<String>) {
+        let kept = texts.filter { nodeId, _ in
+            guard let contentId = canvas.document.nodeById(nodeId: nodeId)?.contentId else { return false }
+            return !changed.contains(contentId)
+        }
+        texts = buildTexts(nodes: canvas.document.nodes, contents: textContents, keeping: kept)
+    }
+
+    private func recordLayout(from document: CanvasDocument) {
+        guard let previous = snapshot(document) else { return }
+        history = history.record(previous: previous, kind: NoteEditKind.layout)
+    }
 
     private func observeDrawing() {
         drawing.objectWillChange
@@ -327,6 +404,14 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     func onEditorIntent(_ intent: any EditorIntent) {
+        if EditorCommands.shared.isPassive(intent: intent) {
+            edit(NoteEditKind.sync) { reduceEditor(intent) }
+        } else {
+            reduceEditor(intent)
+        }
+    }
+
+    private func reduceEditor(_ intent: any EditorIntent) {
         let commands = EditorCommands.shared
         let before = editorState()
         let next = commands.reduce(state: before, intent: intent)
@@ -367,11 +452,7 @@ final class MasterEditorViewModel: ObservableObject {
             adapter.deleteNoteContent(contentId: row.contentId) { _ in }
 
         } else if let files = commands.deleteFilesEffect(effect: effect) {
-            for path in files.paths {
-                deleteFile(
-                    filePath: LocalFilePathResolver_iosKt.resolveLocalFilePath(path: path) ?? path
-                )
-            }
+            trashedFiles.formUnion(files.paths)
 
         } else if let publish = commands.publishMediaEffect(effect: effect) {
             contentBridge.updateMediaContent(content: publish.content)
@@ -402,7 +483,11 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     private func removeContent(id: String) {
+        let dependents = DrawNoteContents.shared.dependentsOf(contents: noteContents, removedId: id)
         onEditorIntent(EditorCommands.shared.removeContent(contentId: id))
+        for dependent in dependents {
+            onEditorIntent(EditorCommands.shared.removeContent(contentId: dependent.id))
+        }
     }
 
     func saveNote() {
@@ -445,6 +530,9 @@ final class MasterEditorViewModel: ObservableObject {
             intent: intent,
             gestureStart: gestureStart
         )
+        if edited && editDepth == 0 {
+            recordLayout(from: gestureStart ?? before.document)
+        }
         let ended = commands.gestureEnded(before: before, next: canvas)
         if ended {
             gestureStart = nil
@@ -486,7 +574,7 @@ final class MasterEditorViewModel: ObservableObject {
         }
         // 🔄 only a user's edit re-orders the note; housekeeping and another device's canvas never re-stamp it
         if edited && commands.orderChanged(before: before, next: canvas) {
-            applyCanvasOrderToNote()
+            reorderNoteByCanvas()
         }
         if canvas.viewport != before.viewport && commands.affectsViewport(intent: intent) {
             canvasBridge.saveViewport(noteId: noteId, viewport: canvas.viewport)
@@ -496,10 +584,12 @@ final class MasterEditorViewModel: ObservableObject {
     // MARK: - Text
 
     func onTextIntent(nodeId: String, intent: MasterTextIntent) {
-        guard let current = texts[nodeId] else { return }
-        let next = MasterTextReducer.shared.reduce(state: current, intent: intent)
-        texts[nodeId] = next
-        if next.document != current.document { persistText(nodeId: nodeId, state: next) }
+        edit(NoteEditKind.text) {
+            guard let current = texts[nodeId] else { return }
+            let next = MasterTextReducer.shared.reduce(state: current, intent: intent)
+            texts[nodeId] = next
+            if next.document != current.document { persistText(nodeId: nodeId, state: next) }
+        }
     }
 
     private func persistText(nodeId: String, state: MasterTextState) {
@@ -512,9 +602,11 @@ final class MasterEditorViewModel: ObservableObject {
 
     // 📄 24-Sep-2026 — a new page is totally blank: fresh paper beside the last page, fitted to the screen, nothing on it
     func addPage() {
-        guard note != nil else { return }
-        let page = addBarePage(housekeeping: false)
-        onCanvasIntent(commands.selectNode(nodeId: page.id))
+        edit(NoteEditKind.layout) {
+            guard note != nil else { return }
+            let page = addBarePage(housekeeping: false)
+            onCanvasIntent(commands.selectNode(nodeId: page.id))
+        }
     }
 
     private func addBarePage(housekeeping: Bool) -> CanvasNode {
@@ -525,6 +617,10 @@ final class MasterEditorViewModel: ObservableObject {
 
     /// A text block is a widget on the current page now — it no longer costs a whole page.
     func addTextBlock() {
+        edit(NoteEditKind.addText) { spawnTextBlock() }
+    }
+
+    private func spawnTextBlock() {
         guard let note else { return }
         guard let page = commands.pageForSpawn(state: canvas) else { return }
         let content = NoteContentObjectHelper.shared.createText(
@@ -558,12 +654,18 @@ final class MasterEditorViewModel: ObservableObject {
             addDrawingWidget()
             return
         }
-        if let content { addContent(content) }
-        spawnWidgetNode(kind: kind, contentId: content?.id)
-        if kind == ContentType.text { refreshMissingTexts() }
+        edit(content == nil ? NoteEditKind.layout : NoteEditKind.addMedia) {
+            if let content { addContent(content) }
+            spawnWidgetNode(kind: kind, contentId: content?.id)
+            if kind == ContentType.text { refreshMissingTexts() }
+        }
     }
 
     func addDrawingWidget() {
+        edit(NoteEditKind.drawing) { spawnDrawingWidget() }
+    }
+
+    private func spawnDrawingWidget() {
         guard let note else { return }
         let page = commands.pageForSpawn(state: canvas) ?? addBarePage(housekeeping: false)
         let notes = DrawNoteContents.shared
@@ -645,10 +747,12 @@ final class MasterEditorViewModel: ObservableObject {
 
     // 🔄 24-Sep-2026 — the content goes first, so the re-order the removal triggers can never save it back
     func deleteNode(nodeId: String) {
-        let contentId = canvas.document.nodeById(nodeId: nodeId)?.contentId
-        if let contentId { removeContent(id: contentId) }
-        onCanvasIntent(commands.removeNode(nodeId: nodeId))
-        texts[nodeId] = nil
+        edit(NoteEditKind.deleteContent) {
+            let contentId = canvas.document.nodeById(nodeId: nodeId)?.contentId
+            if let contentId { removeContent(id: contentId) }
+            onCanvasIntent(commands.removeNode(nodeId: nodeId))
+            texts[nodeId] = nil
+        }
     }
 
     func onCapabilityState(_ next: EditorCapabilityState) {
@@ -691,8 +795,14 @@ final class MasterEditorViewModel: ObservableObject {
             noteId: note.id,
             startPosition: Double(noteContents.count)
         )
-        for item in items {
-            addWidget(kind: item.type, content: item)
+        landImported(items)
+    }
+
+    private func landImported(_ items: [NoteContentModel]) {
+        edit(NoteEditKind.addMedia) {
+            for item in items {
+                addWidget(kind: item.type, content: item)
+            }
         }
     }
 
@@ -706,12 +816,7 @@ final class MasterEditorViewModel: ObservableObject {
             guard let self else { return }
             switch result {
             case .success(let items):
-                for item in items {
-                    self.addWidget(
-                        kind: item.type,
-                        content: item
-                    )
-                }
+                self.landImported(items)
             case .noFileFound:
                 self.errorMessage = "No file found at this link."
             case .failed(let message):
@@ -725,22 +830,30 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     func deleteContent(_ contentId: String) {
-        guard let nodeId = canvas.document.nodeForContent(contentId: contentId)?.id else {
-            removeContent(id: contentId)
-            return
+        edit(NoteEditKind.deleteContent) {
+            guard let nodeId = canvas.document.nodeForContent(contentId: contentId)?.id else {
+                removeContent(id: contentId)
+                return
+            }
+            deleteNode(nodeId: nodeId)
         }
-        deleteNode(nodeId: nodeId)
     }
 
     func renameNode(nodeId: String, name: String) {
-        onCanvasIntent(commands.renameNode(nodeId: nodeId, name: name))
-        canvasBridge.rename(nodeId: nodeId, name: name)
+        edit(NoteEditKind.layout) {
+            onCanvasIntent(commands.renameNode(nodeId: nodeId, name: name))
+            canvasBridge.rename(nodeId: nodeId, name: name)
+        }
     }
 
     // MARK: - Conversion
 
     // 🔄 24-Sep-2026 — the rebuilt board replaces the old one in a single edit: new rows written, old ones deleted, then the note travels
     func rebuildLayoutFromNote() {
+        edit(NoteEditKind.layout) { rebuildLayout() }
+    }
+
+    private func rebuildLayout() {
         guard note != nil else { return }
         let page = canvas.document.pages.first
         let document = CanvasPaginator.shared.build(
@@ -753,6 +866,10 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     func applyCanvasOrderToNote() {
+        edit(NoteEditKind.reorder) { reorderNoteByCanvas() }
+    }
+
+    private func reorderNoteByCanvas() {
         let reordered = NoteCanvasConverter.shared.reorderContents(
             contents: noteContents,
             document: canvas.document

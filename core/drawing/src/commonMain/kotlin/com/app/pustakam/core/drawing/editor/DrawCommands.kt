@@ -42,6 +42,7 @@ import com.app.pustakam.core.drawing.tool.DrawToolRegistry
 import com.app.pustakam.core.drawing.tool.DrawToolSettings
 import com.app.pustakam.core.drawing.tool.DrawToolSpec
 import com.app.pustakam.core.drawing.viewport.DrawSpace
+import com.app.pustakam.core.richtext.master.model.CanvasRect
 
 object DrawCommands {
 
@@ -213,13 +214,13 @@ object DrawCommands {
 
     fun maxBrushSize(): Float = DrawBrush.MAX_SIZE
 
-    fun eraserKinds(): List<DrawEraserKind> = DrawEraserKind.entries
+    fun eraserKinds(state: DrawEditorState): List<DrawEraserKind> = DrawToolRegistry.erasersFor(state.mode)
 
     fun eraserLabel(kind: DrawEraserKind): String = when (kind) {
         DrawEraserKind.PIXEL -> "Pixel"
-        DrawEraserKind.PARTIAL -> "Partial"
+        DrawEraserKind.PARTIAL -> "Portion"
         DrawEraserKind.STROKE -> "Whole stroke"
-        DrawEraserKind.OBJECT -> "Object"
+        DrawEraserKind.OBJECT -> "Whole object"
     }
 
     fun eraserKey(kind: DrawEraserKind): String = kind.name
@@ -572,6 +573,30 @@ object DrawCommands {
         readOnly = state.readOnly
     )
 
+    fun toolbarPlacement(): DrawToolbarPlacement = DrawToolbarPlacement()
+
+    fun fitToolbar(
+        placement: DrawToolbarPlacement,
+        width: Float,
+        height: Float,
+        areaWidth: Float,
+        areaHeight: Float
+    ): DrawToolbarPlacement = DrawToolbarLayout.fitted(placement, width, height, areaWidth, areaHeight)
+
+    fun moveToolbar(
+        placement: DrawToolbarPlacement,
+        deltaX: Float,
+        deltaY: Float,
+        width: Float,
+        height: Float,
+        areaWidth: Float,
+        areaHeight: Float
+    ): DrawToolbarPlacement = DrawToolbarLayout.moved(placement, deltaX, deltaY, width, height, areaWidth, areaHeight)
+
+    fun rotateToolbar(placement: DrawToolbarPlacement): DrawToolbarPlacement = DrawToolbarLayout.rotated(placement)
+
+    fun toolbarMaxLength(areaLength: Float): Float = DrawToolbarLayout.maxLength(areaLength)
+
     fun isCurrentColor(state: DrawEditorState, color: DrawColor): Boolean = state.colors.current == color
 
     fun isSameColor(first: DrawColor, second: DrawColor): Boolean = first.isSimilarTo(second, COLOR_TOLERANCE)
@@ -633,7 +658,36 @@ object DrawCommands {
 
     fun parseLength(text: String): Float? = text.trim().replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }
 
-    fun clears(entries: List<DrawRenderEntry>): Boolean = entries.any { it.item.isClear }
+    fun clears(entries: List<DrawRenderEntry>): Boolean {
+        var depth = 0
+        for (entry in entries) {
+            val item = entry.item
+            when {
+                item.isGroupBegin -> depth++
+                item.isGroupEnd -> depth--
+                depth == 0 && item.isClear -> return true
+            }
+        }
+        return false
+    }
+
+    fun isGroupBegin(item: DrawRenderItem): Boolean = item.isGroupBegin
+
+    fun isGroupEnd(item: DrawRenderItem): Boolean = item.isGroupEnd
+
+    fun groupBounds(entry: DrawRenderEntry): CanvasRect {
+        val bounds = entry.item.bounds
+        val matrix = entry.matrix
+        val corners = listOf(
+            matrix.map(bounds.x, bounds.y),
+            matrix.map(bounds.right, bounds.y),
+            matrix.map(bounds.x, bounds.bottom),
+            matrix.map(bounds.right, bounds.bottom)
+        )
+        val left = corners.minOf { it.x }
+        val top = corners.minOf { it.y }
+        return CanvasRect(left, top, corners.maxOf { it.x } - left, corners.maxOf { it.y } - top)
+    }
 
     fun cachesInk(zoom: Float): Boolean = zoom <= MAX_CACHED_ZOOM
 

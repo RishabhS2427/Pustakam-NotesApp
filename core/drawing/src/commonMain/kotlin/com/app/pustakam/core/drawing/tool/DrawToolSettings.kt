@@ -54,7 +54,7 @@ data class DrawToolSettings(
         fun defaults(): DrawToolSettings = DrawToolSettings(
             brushKind = DrawBrushKind.BALLPOINT,
             brushes = DrawBrushCatalog.defaults(),
-            eraserKind = DrawEraserKind.STROKE,
+            eraserKind = DrawEraserKind.PARTIAL,
             eraserSize = DEFAULT_ERASER,
             shapeKind = DrawShapeKind.RECTANGLE,
             shapes = DrawShapeSpec.kinds().map { DrawShapeSpec.of(it) },

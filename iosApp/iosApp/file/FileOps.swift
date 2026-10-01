@@ -93,6 +93,15 @@ func deleteFile(filePath: String) {
     }
 }
 
+func deleteFilesLater(_ paths: [String]) {
+    guard !paths.isEmpty else { return }
+    DispatchQueue.global(qos: .utility).async {
+        for path in paths {
+            deleteFile(filePath: LocalFilePathResolver_iosKt.resolveLocalFilePath(path: path) ?? path)
+        }
+    }
+}
+
 func saveMediaToDevice(media: NoteContentModel.MediaContent) {
     let path = media.getMediaUrl()
     guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {

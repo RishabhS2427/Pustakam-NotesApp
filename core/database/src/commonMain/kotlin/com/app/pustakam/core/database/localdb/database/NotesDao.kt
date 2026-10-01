@@ -229,6 +229,7 @@ class NotesDao : KoinComponent {
                                   progressPage = (row.progressPage ?: 0L).toInt(),
                                   assetId = row.assetId,
                                   checksum = row.checksum,
+                                  editedFrom = row.drawingTarget,
                               )
 
                               ContentType.LINK -> NoteContentModel.Link(
@@ -327,6 +328,7 @@ class NotesDao : KoinComponent {
                 progressPage = noteContent.progressPage.toLong()
                 assetId = noteContent.assetId
                 checksum = noteContent.checksum
+                drawingTarget = noteContent.editedFrom
             }
             is NoteContentModel.Location -> {
                 address = noteContent.address
@@ -424,7 +426,7 @@ class NotesDao : KoinComponent {
                 width = width?.toInt() ?: 0, height = height?.toInt() ?: 0,
                 thumbnailPath = thumbnailPath,
                 totalPages = totalPages.toInt(), progressPage = progressPage.toInt(),
-                assetId = assetId, checksum = checksum,
+                assetId = assetId, checksum = checksum, editedFrom = drawingTarget,
             )
 
             ContentType.LINK -> Link(
@@ -633,6 +635,7 @@ class NotesDao : KoinComponent {
                                 progressPage = (row.progressPage ?: 0L).toInt(),
                                 assetId = row.assetId,
                                 checksum = row.checksum,
+                                editedFrom = row.drawingTarget,
                             )
 
                           type  == ContentType.LINK-> Link(

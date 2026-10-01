@@ -8,6 +8,7 @@ import com.app.pustakam.core.richtext.master.model.CanvasNode
 import com.app.pustakam.core.richtext.master.model.CanvasRect
 import com.app.pustakam.core.richtext.master.model.CanvasRole
 import com.app.pustakam.core.richtext.master.model.Viewport
+import com.app.pustakam.core.richtext.master.presentation.NoteCanvasConverter
 
 class CanvasDao(private val database: NotesDatabase) {
 
@@ -194,18 +195,4 @@ class CanvasDao(private val database: NotesDatabase) {
 }
 
 // 🔄 24-Sep-2026 — what a pulled canvas node becomes on this device, for an editor that is already open
-fun NoteCanvasNode.toCanvasNode(): CanvasNode = CanvasNode(
-    id = id,
-    kind = runCatching { ContentType.valueOf(kind) }.getOrDefault(ContentType.TEXT),
-    name = name,
-    rect = CanvasRect(x, y, width, height),
-    z = z,
-    contentId = contentId,
-    parentId = parentId,
-    locked = locked,
-    hidden = hidden,
-    links = links,
-    role = runCatching { CanvasRole.valueOf(role) }.getOrDefault(CanvasRole.WIDGET),
-    slotOrder = slotOrder,
-    pageOrder = pageOrder
-)
+fun NoteCanvasNode.toCanvasNode(): CanvasNode = NoteCanvasConverter.fromNoteNode(this)

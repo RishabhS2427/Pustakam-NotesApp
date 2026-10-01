@@ -21,6 +21,7 @@ struct NoteBookReaderView: View {
     /// the MediaContent whose reading progress this book represents
     @State private var progressContentId: String? = nil
     @State private var previewImagePath: String? = nil
+    @State private var previewMediaId: String? = nil
 
     // the engine list, never mutated — progress is always persisted against these indices
     @State private var basePages: [ReaderPage] = []
@@ -129,13 +130,14 @@ struct NoteBookReaderView: View {
             set: { if !$0 { previewImagePath = nil } }
         )) {
             if let path = previewImagePath {
-                ImagePreviewView(path: path) { previewImagePath = nil }
+                ImagePreviewView(path: path, noteId: noteId, mediaId: previewMediaId) { previewImagePath = nil }
             }
         }
     }
 
     private func openMedia(_ media: NoteContentModel.MediaContent) {
         guard media.type == ContentType.image || media.type == ContentType.gif else { return }
+        previewMediaId = media.id
         previewImagePath = media.getMediaUrl()
     }
 
