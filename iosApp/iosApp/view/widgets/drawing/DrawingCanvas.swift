@@ -38,18 +38,19 @@ struct DrawingCanvas: UIViewRepresentable {
 
     let session: DrawingSession
     var anchors: DrawingAnchors? = nil
+    var inputAnchors: DrawingAnchors? = nil
     var navigator: DrawingNavigator? = nil
     var input: Bool = false
     var zoom: CGFloat = 1
 
     func makeUIView(context: Context) -> DrawingCanvasView {
         let view = DrawingCanvasView()
-        view.configure(session: session, anchors: anchors, navigator: navigator, input: input, zoom: zoom)
+        view.configure(session: session, anchors: anchors, inputAnchors: inputAnchors, navigator: navigator, input: input, zoom: zoom)
         return view
     }
 
     func updateUIView(_ view: DrawingCanvasView, context: Context) {
-        view.configure(session: session, anchors: anchors, navigator: navigator, input: input, zoom: zoom)
+        view.configure(session: session, anchors: anchors, inputAnchors: inputAnchors, navigator: navigator, input: input, zoom: zoom)
     }
 }
 
@@ -81,6 +82,8 @@ final class DrawingCanvasView: UIView {
     private var subscription: AnyCancellable?
 
     private var anchors: DrawingAnchors?
+
+    private var inputAnchors: DrawingAnchors?
 
     private var navigator: DrawingNavigator?
 
@@ -118,10 +121,12 @@ final class DrawingCanvasView: UIView {
     func configure(
         session: DrawingSession,
         anchors: DrawingAnchors?,
+        inputAnchors: DrawingAnchors?,
         navigator: DrawingNavigator?,
         input: Bool,
         zoom: CGFloat
     ) {
+        self.inputAnchors = inputAnchors
         if self.session !== session {
             cancelGesture()
             self.session = session
@@ -255,7 +260,7 @@ final class DrawingCanvasView: UIView {
     }
 
     private func currentAnchors() -> [DrawAnchorFrame] {
-        anchors?.frames(in: bounds.size) ?? []
+        (inputAnchors ?? anchors)?.frames(in: bounds.size) ?? []
     }
 
     private func updateResolution() {

@@ -37,6 +37,7 @@ kotlin {
                 api(projects.core.data)
                 api(projects.core.database)
                 api(projects.core.network)
+                api(projects.core.drawing)
                 api(libs.koin)
                 api(libs.kotlinx.serialization.json)
                 implementation(libs.kotlinx.coroutines.core)

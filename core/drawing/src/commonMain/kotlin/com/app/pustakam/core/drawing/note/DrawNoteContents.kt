@@ -11,6 +11,8 @@ import com.app.pustakam.core.drawing.editor.DrawIds
 import com.app.pustakam.core.drawing.model.DrawDocument
 import com.app.pustakam.core.drawing.model.DrawPaper
 import com.app.pustakam.core.drawing.model.DrawSurface
+import com.app.pustakam.core.drawing.ops.DrawOp
+import com.app.pustakam.core.drawing.ops.DrawOpApplier
 import com.app.pustakam.core.drawing.render.DrawRenderEntry
 import com.app.pustakam.core.drawing.render.DrawRenderer
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
@@ -28,6 +30,8 @@ object DrawNoteContents {
     private const val PAGE_SEPARATOR = ":"
 
     private const val EDITED_MIME_TYPE = "image/png"
+
+    private const val OVERLAY_SUFFIX = "overlay"
 
     fun surfaceOf(content: NoteContentModel.Drawing): DrawSurface = DrawCommands.surfaceOf(content.surface)
 
@@ -58,6 +62,14 @@ object DrawNoteContents {
 
     fun create(noteId: String, position: Double, surface: DrawSurface, width: Float, height: Float): NoteContentModel.Drawing =
         created(noteId, position, surface, width, height, NO_TARGET)
+
+    fun overlayId(noteId: String): String = "$noteId$PAGE_SEPARATOR$OVERLAY_SUFFIX"
+
+    fun createOverlay(noteId: String, position: Double): NoteContentModel.Drawing =
+        create(noteId, position, DrawSurface.OVERLAY, 0f, 0f).copy(id = overlayId(noteId))
+
+    fun withOp(content: NoteContentModel.Drawing, op: DrawOp): NoteContentModel.Drawing =
+        written(content, DrawOpApplier.apply(documentOf(content), op))
 
     fun createAnnotation(noteId: String, position: Double, targetId: String): NoteContentModel.Drawing =
         created(noteId, position, DrawSurface.OVERLAY, 0f, 0f, targetId)

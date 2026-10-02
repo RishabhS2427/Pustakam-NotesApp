@@ -94,6 +94,7 @@ struct NoteDrawingBlock: View {
 
     @Environment(\.colorScheme) private var scheme
     @State private var paperAspect: CGFloat?
+    @State private var transparent = false
 
     private var aspect: CGFloat {
         if content.isWidget() {
@@ -119,7 +120,7 @@ struct NoteDrawingBlock: View {
                 )
             }
             .clipShape(shape)
-            .overlay(shape.stroke(active ? palette.accent : palette.divider, lineWidth: active ? 1.5 : 1))
+            .overlay(shape.stroke(active ? palette.accent : palette.divider, lineWidth: active ? 1.5 : 1).opacity(active || !transparent ? 1 : 0))
             .overlay(alignment: .topTrailing) {
                 if active {
                     Button(action: onDelete) {
@@ -137,6 +138,9 @@ struct NoteDrawingBlock: View {
             .padding(.vertical, 8)
             .onReceive(session.$state.map { CGFloat(DrawCommands.shared.paperAspect(state: $0)) }.removeDuplicates()) {
                 paperAspect = $0
+            }
+            .onReceive(session.$state.map { DrawCommands.shared.isTransparent(state: $0) }.removeDuplicates()) {
+                transparent = $0
             }
     }
 }

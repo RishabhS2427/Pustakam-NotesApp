@@ -1,6 +1,5 @@
 package com.app.pustakam.android.widgets.drawing
 
-import com.app.pustakam.core.drawing.editor.DrawCommands
 import com.app.pustakam.core.drawing.note.DrawNoteContents
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,7 +78,7 @@ class DrawingHost(
         val position = DrawNoteContents.nextPosition(current)
         val document = documentId()
         val draft = if (document == null) {
-            DrawNoteContents.create(id, position, DrawCommands.overlaySurface(), 0f, 0f)
+            DrawNoteContents.createOverlay(id, position)
         } else {
             DrawNoteContents.createAnnotation(id, position, document)
         }

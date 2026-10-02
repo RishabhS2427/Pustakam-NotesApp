@@ -25,6 +25,8 @@ import com.app.pustakam.core.drawing.model.DrawSurface
 import com.app.pustakam.core.drawing.model.DrawTexture
 import com.app.pustakam.core.drawing.model.DrawUnit
 import com.app.pustakam.core.drawing.model.DrawUnits
+import com.app.pustakam.core.drawing.live.DrawLive
+import com.app.pustakam.core.drawing.live.DrawLiveRoom
 import com.app.pustakam.core.drawing.ops.DrawOp
 import com.app.pustakam.core.drawing.render.DrawCap
 import com.app.pustakam.core.drawing.render.DrawFrameBuilder
@@ -509,6 +511,9 @@ object DrawCommands {
 
     fun previewFrame(state: DrawEditorState, anchors: List<DrawAnchorFrame>): List<DrawRenderEntry> =
         DrawFrameBuilder.previewed(state.preview.elements, DrawSpace(state.viewport, anchors))
+
+    fun liveFrame(state: DrawEditorState, room: DrawLiveRoom?, anchors: List<DrawAnchorFrame>): List<DrawRenderEntry> =
+        if (room == null) emptyList() else DrawFrameBuilder.previewed(DrawLive.previews(room), DrawSpace(state.viewport, anchors))
 
     fun committedKey(state: DrawEditorState, anchors: List<DrawAnchorFrame>, width: Float, height: Float): String =
         "${state.document.id}|${state.revision}|${state.viewport}|${state.preview.hiddenIds.sorted()}|$anchors|$width|$height"

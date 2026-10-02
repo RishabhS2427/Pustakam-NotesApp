@@ -96,7 +96,7 @@ final class DrawingHost: ObservableObject {
         if let document = documentId() {
             draft = notes.createAnnotation(noteId: id, position: position, targetId: document)
         } else {
-            draft = notes.create(noteId: id, position: position, surface: DrawCommands.shared.overlaySurface(), width: 0, height: 0)
+            draft = notes.createOverlay(noteId: id, position: position)
         }
         overlayDraft = draft
         return draft

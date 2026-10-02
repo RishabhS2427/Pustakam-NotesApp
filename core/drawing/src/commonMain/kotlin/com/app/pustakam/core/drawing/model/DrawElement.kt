@@ -63,6 +63,16 @@ data class DrawElement(
 
     fun withCuts(value: List<DrawCut>): DrawElement = copy(cuts = value)
 
+    fun rehomed(layer: String, anchor: String?): DrawElement = copy(layerId = layer, anchorId = anchor)
+
+    fun transformed(scale: Float, offsetX: Float, offsetY: Float): DrawElement = copy(
+        points = points.map { it.movedTo(it.x * scale + offsetX, it.y * scale + offsetY) },
+        brush = if (scale == 1f) brush else brush.scaledBy(scale),
+        cuts = cuts.map { cut ->
+            DrawCut(cut.points.map { it.movedTo(it.x * scale + offsetX, it.y * scale + offsetY) }, cut.radius * scale)
+        }
+    )
+
     fun wins(other: DrawElement): Boolean =
         clock > other.clock || (clock == other.clock && author > other.author)
 

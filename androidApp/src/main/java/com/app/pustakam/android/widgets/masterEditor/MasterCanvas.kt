@@ -66,6 +66,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.app.pustakam.android.widgets.smartText.SmartTextTokens
+import com.app.pustakam.core.drawing.anchor.DrawAnchorFrame
+import com.app.pustakam.core.drawing.note.DrawBoardInk
+import com.app.pustakam.core.drawing.note.DrawBoardPage
+import com.app.pustakam.core.richtext.master.model.CanvasDocument
 import com.app.pustakam.core.richtext.master.model.CanvasNode
 import com.app.pustakam.core.richtext.master.model.CanvasRect
 import com.app.pustakam.core.richtext.master.presentation.CanvasCommands
@@ -97,21 +101,15 @@ private data class LiftedWidget(
         copy(left = left + dx, top = top + dy, fingerX = fingerX + dx, fingerY = fingerY + dy)
 }
 
-data class MasterPageFrame(
-    val pageId: String,
-    val x: Float,
-    val y: Float,
-    val width: Float,
-    val height: Float,
-    val contentX: Float,
-    val contentY: Float,
-    val scale: Float
-)
-
 class MasterBoardFrames {
-    internal var reader: () -> List<MasterPageFrame> = { emptyList() }
+    internal var reader: () -> List<DrawBoardPage> = { emptyList() }
 
-    fun current(): List<MasterPageFrame> = reader()
+    internal var document: () -> CanvasDocument = { CanvasDocument() }
+
+    fun current(): List<DrawBoardPage> = reader()
+
+    fun anchors(onlyPageId: String? = null): List<DrawAnchorFrame> =
+        DrawBoardInk.anchors(document(), current().filter { onlyPageId == null || it.pageId == onlyPageId })
 }
 
 /** What a page's widgets call while one of them is carried. */
@@ -141,6 +139,7 @@ fun MasterCanvas(
     // 📕 25-Sep-2026 — the note's title, drawn as a hard-cover page; null or blank draws nothing
     coverTitle: String? = null,
     frames: MasterBoardFrames? = null,
+    pageBadge: (String) -> String? = { null },
     nodeContent: @Composable (CanvasNode, Boolean) -> Unit
 ) {
     val colors = SmartTextTokens.colors
@@ -156,13 +155,14 @@ fun MasterCanvas(
 
     if (frames != null) {
         SideEffect {
+            frames.document = { liveState.document }
             frames.reader = {
                 val live = liveState
                 val scale = live.viewport.scale.takeIf { it > 0f } ?: 1f
                 live.visibleNodes.map { page ->
                     val screen = CanvasCommands.screenRectOf(live.document, page, live.viewport)
                     val scroll = scrolls[page.id]
-                    MasterPageFrame(
+                    DrawBoardPage(
                         pageId = page.id,
                         x = screen.x,
                         y = screen.y,
@@ -314,6 +314,7 @@ fun MasterCanvas(
                     onRename = onRename,
                     onMeasured = onMeasured,
                     lift = lift,
+                    badge = pageBadge(page.id),
                     nodeContent = nodeContent
                 )
             }
@@ -372,6 +373,7 @@ private fun BoxScope.MasterPage(
     onRename: (String, String) -> Unit,
     onMeasured: (String, Float) -> Unit,
     lift: WidgetLift,
+    badge: String?,
     nodeContent: @Composable (CanvasNode, Boolean) -> Unit
 ) {
     val colors = SmartTextTokens.colors
@@ -445,6 +447,16 @@ private fun BoxScope.MasterPage(
                     isSelected = isSelected,
                     onRename = { onRename(page.id, it) }
                 )
+                if (badge != null) {
+                    Text(
+                        text = badge,
+                        style = TextStyle(color = colors.accent, fontSize = 11.sp),
+                        maxLines = 1,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 10.dp)
+                    )
+                }
             }
             Box(
                 modifier = Modifier

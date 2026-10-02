@@ -2,18 +2,23 @@ package com.app.pustakam.feature.chat.di
 
 import com.app.pustakam.feature.chat.data.repositoryImpl.ChatRepository
 import com.app.pustakam.feature.chat.data.repositoryImpl.ChatSocketRepository
+import com.app.pustakam.feature.chat.data.repositoryImpl.LiveDrawingRepository
 import com.app.pustakam.feature.chat.domain.repository.IChatRepository
 import com.app.pustakam.feature.chat.domain.repository.IChatSocketRepository
+import com.app.pustakam.feature.chat.domain.repository.ILiveDrawingRepository
 import com.app.pustakam.feature.chat.domain.usecase.DeleteChatMessageUseCase
 import com.app.pustakam.feature.chat.domain.usecase.DeleteConversationUseCase
 import com.app.pustakam.feature.chat.domain.usecase.FlushChatOutboxUseCase
 import com.app.pustakam.feature.chat.domain.usecase.GetChatPeersUseCase
+import com.app.pustakam.feature.chat.domain.usecase.JoinLiveRoomUseCase
+import com.app.pustakam.feature.chat.domain.usecase.LeaveLiveRoomUseCase
 import com.app.pustakam.feature.chat.domain.usecase.LoadChatHistoryUseCase
 import com.app.pustakam.feature.chat.domain.usecase.MarkConversationReadUseCase
 import com.app.pustakam.feature.chat.domain.usecase.ObserveConversationUseCase
 import com.app.pustakam.feature.chat.domain.usecase.OpenConversationUseCase
 import com.app.pustakam.feature.chat.domain.usecase.RefreshConversationsUseCase
 import com.app.pustakam.feature.chat.domain.usecase.SendChatMessageUseCase
+import com.app.pustakam.feature.chat.domain.usecase.SendLiveRequestUseCase
 import com.app.pustakam.feature.chat.domain.usecase.SetChatForegroundUseCase
 import com.app.pustakam.feature.chat.domain.usecase.SetTypingUseCase
 import com.app.pustakam.feature.chat.domain.usecase.StartChatUseCase
@@ -27,6 +32,7 @@ fun chatModule(): Module = module {
     single<IChatSocketRepository> { ChatSocketRepository() }
     // 💬 single: it owns the conversation, message and typing flows every screen collects
     single<IChatRepository> { ChatRepository() }
+    single<ILiveDrawingRepository> { LiveDrawingRepository() }
 
     factory<StartChatUseCase> { StartChatUseCase() }
     factory<StopChatUseCase> { StopChatUseCase() }
@@ -42,4 +48,7 @@ fun chatModule(): Module = module {
     factory<DeleteChatMessageUseCase> { DeleteChatMessageUseCase() }
     factory<MarkConversationReadUseCase> { MarkConversationReadUseCase() }
     factory<SetTypingUseCase> { SetTypingUseCase() }
+    factory<JoinLiveRoomUseCase> { JoinLiveRoomUseCase() }
+    factory<LeaveLiveRoomUseCase> { LeaveLiveRoomUseCase() }
+    factory<SendLiveRequestUseCase> { SendLiveRequestUseCase() }
 }

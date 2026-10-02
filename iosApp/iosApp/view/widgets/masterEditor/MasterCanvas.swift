@@ -32,37 +32,31 @@ private final class PageScrollBook {
     var onScroll: () -> Void = {}
 }
 
-struct MasterPageFrame {
-    let pageId: String
-    let x: Float
-    let y: Float
-    let width: Float
-    let height: Float
-    let contentX: Float
-    let contentY: Float
-    let scale: Float
-}
-
 final class MasterBoardFrames {
 
-    var reader: () -> [MasterPageFrame] = { [] }
+    var reader: () -> [DrawBoardPage] = { [] }
+
+    var document: () -> CanvasDocument? = { nil }
+
+    private var inputPage: String?
 
     private(set) lazy var anchors = DrawingAnchors { [weak self] _ in
-        (self?.current() ?? []).map {
-            DrawCommands.shared.mappedAnchor(
-                id: $0.pageId,
-                x: $0.x,
-                y: $0.y,
-                width: $0.width,
-                height: $0.height,
-                originX: $0.contentX,
-                originY: $0.contentY,
-                scale: $0.scale
-            )
-        }
+        guard let self, let document = self.document() else { return [] }
+        return DrawBoardInk.shared.anchors(document: document, pages: self.current())
     }
 
-    func current() -> [MasterPageFrame] { reader() }
+    private lazy var pageInput = DrawingAnchors { [weak self] _ in
+        guard let self, let document = self.document() else { return [] }
+        let page = self.inputPage
+        return DrawBoardInk.shared.anchors(document: document, pages: self.current().filter { page == nil || $0.pageId == page })
+    }
+
+    func inputAnchors(page: String?) -> DrawingAnchors {
+        inputPage = page
+        return pageInput
+    }
+
+    func current() -> [DrawBoardPage] { reader() }
 
     func moved() { anchors.refresh() }
 }
@@ -94,6 +88,7 @@ struct MasterCanvas<NodeContent: View>: View {
     // 📕 25-Sep-2026 — the note's title, drawn as a hard-cover page; nil or blank draws nothing
     var coverTitle: String? = nil
     var frames: MasterBoardFrames? = nil
+    var pageBadge: (String) -> String? = { _ in nil }
     @ViewBuilder let nodeContent: (CanvasNode, Bool) -> NodeContent
 
     @Environment(\.colorScheme) private var scheme
@@ -155,6 +150,7 @@ struct MasterCanvas<NodeContent: View>: View {
         guard let frames else { return }
         let live = state
         let book = scrollBook
+        frames.document = { live.document }
         frames.reader = {
             let scale = live.viewport.scale > 0 ? live.viewport.scale : 1
             return live.visibleNodes.map { page in
@@ -164,7 +160,7 @@ struct MasterCanvas<NodeContent: View>: View {
                     viewport: live.viewport
                 )
                 let offset: CGPoint = book.offsets[page.id] ?? .zero
-                return MasterPageFrame(
+                return DrawBoardPage(
                     pageId: page.id,
                     x: screen.x,
                     y: screen.y,
@@ -250,6 +246,17 @@ struct MasterCanvas<NodeContent: View>: View {
         .overlay(alignment: .bottomTrailing) {
             if placement.isSelected && permits.canResizeNode && !page.locked {
                 resizeHandle(for: page)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if let badge = pageBadge(page.id) {
+                Text(badge)
+                    .font(.system(size: 11))
+                    .foregroundColor(palette.accent)
+                    .lineLimit(1)
+                    .padding(.trailing, 10)
+                    .frame(height: masterPageHeaderHeight)
+                    .allowsHitTesting(false)
             }
         }
         .offset(x: frame.minX, y: frame.minY)

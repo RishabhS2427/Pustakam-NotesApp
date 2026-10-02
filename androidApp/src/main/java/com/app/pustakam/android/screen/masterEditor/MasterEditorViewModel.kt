@@ -73,6 +73,20 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import com.app.pustakam.android.widgets.drawing.DrawingHost
 import com.app.pustakam.core.drawing.editor.DrawCommands
+import com.app.pustakam.core.drawing.editor.DrawEditorState
+import com.app.pustakam.core.drawing.live.DrawLive
+import com.app.pustakam.core.drawing.live.DrawLiveEvent
+import com.app.pustakam.core.drawing.live.DrawLiveOutbox
+import com.app.pustakam.core.drawing.live.DrawLiveRequest
+import com.app.pustakam.core.drawing.live.DrawLiveRoom
+import com.app.pustakam.core.drawing.note.DrawBoardInk
+import com.app.pustakam.feature.chat.domain.usecase.JoinLiveRoomUseCase
+import com.app.pustakam.feature.chat.domain.usecase.LeaveLiveRoomUseCase
+import com.app.pustakam.feature.chat.domain.usecase.SendLiveRequestUseCase
+import com.app.pustakam.feature.notes.domain.usecase.RequestSyncUseCase
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filter
 import com.app.pustakam.core.drawing.note.DrawNoteContents
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -89,6 +103,7 @@ data class MasterEditorUiState(
     val canvasReady: Boolean = false,
     val capabilities: EditorCapabilityState = EditorCapabilityState(),
     val history: NoteHistory = NoteHistory(),
+    val live: DrawLiveRoom? = null,
     val error: String? = null
 ) {
     fun textFor(nodeId: String): MasterTextState? = texts[nodeId]
@@ -107,6 +122,10 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     private val moveCanvasNode by inject<MoveCanvasNodeUseCase>()
     private val resizeCanvasNode by inject<ResizeCanvasNodeUseCase>()
     private val renameCanvasNode by inject<RenameCanvasNodeUseCase>()
+    private val joinLiveRoom by inject<JoinLiveRoomUseCase>()
+    private val leaveLiveRoom by inject<LeaveLiveRoomUseCase>()
+    private val sendLiveRequest by inject<SendLiveRequestUseCase>()
+    private val requestSync by inject<RequestSyncUseCase>()
     private val removeCanvasNode by inject<RemoveCanvasNodeUseCase>()
     private val saveCanvasViewport by inject<SaveCanvasViewportUseCase>()
     private val readNoteUseCase by inject<ReadNoteUseCase>()
@@ -138,8 +157,16 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         contents = { _state.value.note?.contents.orEmpty() },
         noteId = { _state.value.note?.id },
         documentId = { null },
-        onWrite = { content -> edit(NoteEditKind.DRAWING) { onEditorIntent(EditorIntent.UpdateContent(content)) } }
+        onWrite = { content ->
+            edit(if (remoteDepth > 0) NoteEditKind.SYNC else NoteEditKind.DRAWING) {
+                onEditorIntent(EditorIntent.UpdateContent(content))
+            }
+        }
     )
+
+    private var remoteDepth = 0
+    private var liveJobs: List<Job> = emptyList()
+    private var liveOutbox: DrawLiveOutbox? = null
 
     init {
         viewModelScope.launch {
@@ -496,6 +523,7 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         adoptPendingRemote()
         followDrawingEditing(before, next)
         if (ended) syncDrawingFrames(next)
+        if (before.viewport != next.viewport || before.selectedNodeId != next.selectedNodeId) claimLivePage()
     }
 
     private fun recordLayout(start: CanvasDocument) {
@@ -623,8 +651,15 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     }
 
     fun toggleDrawingOverlay() {
-        if (!drawing.isOverlayActive()) onCanvasIntent(CanvasCommands.useSelectTool())
+        if (drawing.isOverlayActive()) {
+            drawing.stop()
+            settleBoardInk()
+            shareLiveChanges()
+            return
+        }
+        onCanvasIntent(CanvasCommands.useSelectTool())
         drawing.toggleOverlay()
+        claimLivePage()
     }
 
     fun finishDrawing() {
@@ -632,6 +667,98 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
             onCanvasIntent(CanvasCommands.exitEditing())
         } else {
             drawing.stop()
+            settleBoardInk()
+            shareLiveChanges()
+        }
+    }
+
+    fun toggleLive() {
+        if (_state.value.live != null) stopLive() else startLive()
+    }
+
+    private fun startLive() {
+        val roomId = _state.value.note?.id ?: return
+        liveOutbox = DrawLiveOutbox(roomId)
+        _state.update { it.copy(live = DrawLive.joining(roomId)) }
+        joinLiveRoom(roomId)
+        liveJobs = listOf(
+            viewModelScope.launch {
+                joinLiveRoom.rooms.map { it[roomId] }.distinctUntilChanged().collect { room -> room?.let(::onLiveRoom) }
+            },
+            viewModelScope.launch {
+                joinLiveRoom.events.filter { it.roomId == roomId }.collect(::onLiveEvent)
+            },
+            viewModelScope.launch {
+                drawing.overlay.collectLatest { session -> session?.state?.collect(::streamLive) }
+            }
+        )
+    }
+
+    private fun stopLive() {
+        val room = _state.value.live ?: return
+        liveJobs.forEach { it.cancel() }
+        liveJobs = emptyList()
+        liveOutbox = null
+        leaveLiveRoom(room.roomId)
+        _state.update { it.copy(live = null) }
+    }
+
+    private fun onLiveRoom(room: DrawLiveRoom) {
+        val previous = _state.value.live ?: return
+        _state.update { it.copy(live = room) }
+        if (room.syncRevision > previous.syncRevision) requestSync()
+        claimLivePage()
+    }
+
+    private fun onLiveEvent(event: DrawLiveEvent) {
+        if (event !is DrawLiveEvent.Op) return
+        val session = drawing.overlaySession(create = true) ?: return
+        remoteDepth++
+        try {
+            session.dispatch(DrawCommands.applyRemote(event.op))
+        } finally {
+            remoteDepth--
+        }
+    }
+
+    private fun streamLive(state: DrawEditorState) {
+        val room = _state.value.live ?: return
+        val outbox = liveOutbox ?: return
+        outbox.next(state, DrawLive.inputPage(room), System.currentTimeMillis()).forEach { sendLiveRequest(it) }
+        if (!state.isDrawing) claimLivePage()
+    }
+
+    private fun claimLivePage() {
+        val room = _state.value.live ?: return
+        val outbox = liveOutbox ?: return
+        val focused = CanvasCommands.pageForSpawn(_state.value.canvas)?.id
+        val busy = drawing.overlay.value?.current?.isDrawing == true
+        outbox.claims(room, focused, drawing.isOverlayActive(), busy, System.currentTimeMillis())
+            .forEach { sendLiveRequest(it) }
+    }
+
+    private fun shareLiveChanges() {
+        val roomId = _state.value.live?.roomId ?: return
+        claimLivePage()
+        requestSync()
+        viewModelScope.launch {
+            delay(LIVE_SYNC_DELAY_MILLIS)
+            sendLiveRequest(DrawLiveRequest.Sync(roomId))
+        }
+    }
+
+    private fun settleBoardInk() {
+        val overlay = _state.value.note?.contents?.let(DrawNoteContents::overlayOf) ?: return
+        if (!DrawBoardInk.hasLooseInk(overlay, _state.value.canvas.document)) return
+        edit(NoteEditKind.DRAWING) {
+            if (DrawBoardInk.needsPage(overlay, _state.value.canvas.document)) addBarePage(housekeeping = false)
+            val note = _state.value.note ?: return@edit
+            val settlement = DrawBoardInk.settle(overlay, _state.value.canvas.document, DrawNoteContents.nextPosition(note.contents))
+            if (settlement.overlay.drawing != overlay.drawing) onEditorIntent(EditorIntent.UpdateContent(settlement.overlay))
+            settlement.blocks.forEach { block ->
+                onEditorIntent(EditorIntent.AddContent(block.content))
+                onCanvasIntent(CanvasEditorIntent.AddNode(block.node))
+            }
         }
     }
 
@@ -923,12 +1050,15 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     companion object {
         /** Sub-pixel measurement noise must not start a resize/measure ping-pong. */
         private const val MEASURE_EPSILON = 1.5f
+
+        private const val LIVE_SYNC_DELAY_MILLIS = 1_500L
     }
 
     // 🎧 the player's list belongs to the screen that is open, exactly as in the note editor
     override fun onCleared() {
         super.onCleared()
         clearSelectedNoteContentUseCase()
+        stopLive()
         deleteFilesLater(NoteFiles.discardable(trashedFiles, _state.value.note?.contents.orEmpty()))
     }
 }

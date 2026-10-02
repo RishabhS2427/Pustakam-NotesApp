@@ -100,7 +100,8 @@ struct MasterEditorScreen: View {
             },
             keyboardInset: keyboardHeight,
             coverTitle: viewModel.note?.title,
-            frames: boardFrames
+            frames: boardFrames,
+            pageBadge: { [live = viewModel.live] pageId in DrawLive.shared.labelOn(room: live, pageId: pageId) }
         ) { node, isEditing in
             nodeBody(node: node, isEditing: isEditing)
         }
@@ -150,7 +151,23 @@ struct MasterEditorScreen: View {
     @ViewBuilder
     private var boardInk: some View {
         if let overlay = viewModel.drawing.overlay {
-            DrawingCanvas(session: overlay, anchors: boardFrames.anchors, input: viewModel.drawing.isOverlayActive())
+            let live = viewModel.live
+            DrawingCanvas(
+                session: overlay,
+                anchors: boardFrames.anchors,
+                inputAnchors: boardFrames.inputAnchors(page: DrawLive.shared.inputPage(room: live)),
+                input: viewModel.drawing.isOverlayActive() && DrawLive.shared.acceptsInput(room: live)
+            )
+            if let live {
+                DrawingEntries { width, height in
+                    DrawCommands.shared.liveFrame(
+                        state: overlay.current,
+                        room: live,
+                        anchors: boardFrames.anchors.frames(in: CGSize(width: CGFloat(width), height: CGFloat(height)))
+                    )
+                }
+                .allowsHitTesting(false)
+            }
         }
     }
 
@@ -227,6 +244,11 @@ struct MasterEditorScreen: View {
 
     private var zoomLabel: String { "\(viewModel.canvas.zoomPercent)%" }
 
+    private var liveTint: Color {
+        guard let live = viewModel.live else { return palette.onSurface }
+        return DrawLive.shared.isLive(room: live) ? palette.accent : palette.onSurfaceMuted
+    }
+
     private var zoomBar: some View {
         HStack(spacing: 4) {
             barButton(icon: DrawingIcons.undo, tint: viewModel.history.canUndo ? palette.onSurface : palette.onSurfaceMuted) {
@@ -254,6 +276,15 @@ struct MasterEditorScreen: View {
             toolButtons
             barButton(icon: DrawingIcons.draw, tint: viewModel.drawing.isOverlayActive() ? palette.accent : palette.onSurface) {
                 viewModel.toggleDrawingOverlay()
+            }
+            barButton(icon: "dot.radiowaves.left.and.right", tint: liveTint) {
+                viewModel.toggleLive()
+            }
+            .accessibilityLabel(Text(viewModel.live == nil ? "Go live" : "Stop live"))
+            if let live = viewModel.live, DrawLive.shared.isLive(room: live) {
+                Text("\(live.members.count)")
+                    .font(.system(size: 13))
+                    .foregroundColor(palette.accent)
             }
             barButton(icon: "plus.square.on.square", tint: palette.accent) {
                 showAttach = true

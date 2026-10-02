@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,8 +66,10 @@ import com.app.pustakam.android.widgets.masterEditor.MasterBoardFrames
 import com.app.pustakam.android.widgets.masterEditor.MasterCanvas
 import com.app.pustakam.android.widgets.drawing.DrawingCanvas
 import com.app.pustakam.android.widgets.drawing.DrawingChrome
-import com.app.pustakam.android.widgets.drawing.drawingInput
+import com.app.pustakam.android.widgets.drawing.DrawingEntries
 import com.app.pustakam.core.drawing.editor.DrawCommands
+import com.app.pustakam.core.drawing.live.DrawLive
+import com.app.pustakam.android.widgets.drawing.drawingInput
 import com.app.pustakam.android.widgets.smartText.SmartTextKeyboardToolbar
 import com.app.pustakam.android.widgets.smartText.SmartTextSheet
 import com.app.pustakam.android.widgets.smartText.SmartTextSheetHost
@@ -104,13 +107,10 @@ fun MasterEditorScreen(
     val drawingTarget by viewModel.drawing.target.collectAsStateWithLifecycle()
     BackHandler(enabled = drawingTarget != null) { viewModel.finishDrawing() }
     val boardFrames = remember { MasterBoardFrames() }
-    val boardAnchors = remember(boardFrames) {
-        {
-            boardFrames.current().map {
-                DrawCommands.mappedAnchor(it.pageId, it.x, it.y, it.width, it.height, it.contentX, it.contentY, it.scale)
-            }
-        }
-    }
+    val boardAnchors = remember(boardFrames) { { boardFrames.anchors() } }
+    val live = uiState.live
+    val inputPage = DrawLive.inputPage(live)
+    val inputAnchors = remember(boardFrames, inputPage) { { boardFrames.anchors(inputPage) } }
 
     OnLifecycleEvent { _, event ->
         when (event) {
@@ -179,8 +179,8 @@ fun MasterEditorScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .then(
-                    if (overlayActive && overlaySession != null) {
-                        Modifier.drawingInput(overlaySession, boardAnchors)
+                    if (overlayActive && overlaySession != null && DrawLive.acceptsInput(live)) {
+                        Modifier.drawingInput(overlaySession, inputAnchors)
                     } else {
                         Modifier
                     }
@@ -193,7 +193,8 @@ fun MasterEditorScreen(
                 onMeasured = viewModel::onWidgetMeasured,
                 keyboardInsetPx = imeHeightPx,
                 coverTitle = uiState.note?.title,
-                frames = boardFrames
+                frames = boardFrames,
+                pageBadge = { pageId -> DrawLive.labelOn(live, pageId) }
             ) { node, isEditing ->
                 val nodeContent = uiState.note?.contents?.firstOrNull { it.id == node.contentId }
                 MasterNodeContent(
@@ -237,6 +238,12 @@ fun MasterEditorScreen(
             }
             if (overlaySession != null) {
                 DrawingCanvas(session = overlaySession, modifier = Modifier.matchParentSize(), anchors = boardAnchors)
+                if (live != null) {
+                    DrawingEntries(
+                        entries = { _, _ -> DrawCommands.liveFrame(overlaySession.current, live, boardAnchors()) },
+                        modifier = Modifier.matchParentSize()
+                    )
+                }
             }
         }
 
@@ -310,6 +317,23 @@ fun MasterEditorScreen(
                     Icons.Default.Edit,
                     contentDescription = "Draw on board",
                     tint = if (overlayActive) colors.accent else colors.onSurface
+                )
+            }
+            IconButton(onClick = viewModel::toggleLive) {
+                Icon(
+                    Icons.Default.Sensors,
+                    contentDescription = if (live == null) "Go live" else "Stop live",
+                    tint = when {
+                        live == null -> colors.onSurface
+                        DrawLive.isLive(live) -> colors.accent
+                        else -> colors.onSurfaceMuted
+                    }
+                )
+            }
+            if (live != null && DrawLive.isLive(live)) {
+                Text(
+                    text = "${live.members.size}",
+                    style = TextStyle(color = colors.accent, fontSize = 13.sp)
                 )
             }
         }

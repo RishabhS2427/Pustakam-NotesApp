@@ -59,6 +59,9 @@ internal class ChatSocketRepository : IChatSocketRepository, KoinComponent {
     private val _events = MutableSharedFlow<ChatSocketEvent>(replay = 0, extraBufferCapacity = EVENT_BUFFER)
     override val events: SharedFlow<ChatSocketEvent> = _events.asSharedFlow()
 
+    private val _frames = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = EVENT_BUFFER)
+    override val frames: SharedFlow<String> = _frames.asSharedFlow()
+
     private var connection: ChatSocketConnection? = null
     private var reconnectJob: Job? = null
     private var backoffMillis = FIRST_BACKOFF_MILLIS
@@ -108,6 +111,8 @@ internal class ChatSocketRepository : IChatSocketRepository, KoinComponent {
     override fun sendRead(frameId: String, payload: SocketReadPayload): Boolean =
         write(ChatSocketProtocol.encodeRead(frameId, payload))
 
+    override fun sendFrame(frame: String): Boolean = write(frame)
+
     private fun write(frame: String): Boolean {
         val socket = connection ?: return false
         if (_connectionState.value != ChatConnectionState.CONNECTED) return false
@@ -144,7 +149,10 @@ internal class ChatSocketRepository : IChatSocketRepository, KoinComponent {
             emit(ChatSocketEvent.Connected)
         }
 
-        override fun onText(text: String) = emit(ChatSocketProtocol.decode(text))
+        override fun onText(text: String) {
+            _frames.tryEmit(text)
+            emit(ChatSocketProtocol.decode(text))
+        }
 
         override fun onClosed(reason: String) = handleDrop(reason)
 

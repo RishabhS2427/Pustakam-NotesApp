@@ -17,6 +17,7 @@ final class MasterEditorViewModel: ObservableObject {
         limit: NoteHistory.companion.DEFAULT_LIMIT
     )
     @Published var keyboardDismissToken: Int = 0
+    @Published private(set) var live: DrawLiveRoom?
 
     private(set) lazy var drawing = DrawingHost(
         contents: { [weak self] in self?.noteContents ?? [] },
@@ -24,9 +25,17 @@ final class MasterEditorViewModel: ObservableObject {
         documentId: { nil },
         onWrite: { [weak self] content in
             guard let self else { return }
-            self.edit(NoteEditKind.drawing) { self.updateContent(content) }
+            self.edit(self.remoteDepth > 0 ? NoteEditKind.sync : NoteEditKind.drawing) { self.updateContent(content) }
         }
     )
+
+    private var remoteDepth = 0
+    private let liveBridge = LiveDrawingBridge()
+    private let syncBridge = SyncBridge()
+    private var liveHandles: [Closeable] = []
+    private var liveStream: AnyCancellable?
+    private var liveOutbox: DrawLiveOutbox?
+    private static let liveSyncDelay: TimeInterval = 1.5
 
     private var editDepth = 0
     private var editStart: Note?
@@ -67,6 +76,10 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     deinit {
+        liveHandles.forEach { $0.close() }
+        if let room = live { liveBridge.leave(roomId: room.roomId) }
+        liveBridge.dispose()
+        syncBridge.dispose()
         contentSyncHandle?.close()
         remoteCanvasHandle?.close()
         contentBridge.dispose()
@@ -546,6 +559,7 @@ final class MasterEditorViewModel: ObservableObject {
         adoptPendingRemote()
         followDrawingEditing(before: before, next: reduced)
         if ended { syncDrawingFrames(reduced) }
+        if before.viewport != reduced.viewport || before.selectedNodeId != reduced.selectedNodeId { claimLivePage() }
     }
 
     /// 📄 23-Sep-2026 — one rule for every intent: whatever the reduce changed is written, what
@@ -684,8 +698,15 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     func toggleDrawingOverlay() {
-        if !drawing.isOverlayActive() { onCanvasIntent(commands.useSelectTool()) }
+        if drawing.isOverlayActive() {
+            drawing.stop()
+            settleBoardInk()
+            shareLiveChanges()
+            return
+        }
+        onCanvasIntent(commands.useSelectTool())
         drawing.toggleOverlay()
+        claimLivePage()
     }
 
     func finishDrawing() {
@@ -693,6 +714,112 @@ final class MasterEditorViewModel: ObservableObject {
             onCanvasIntent(commands.exitEditing())
         } else {
             drawing.stop()
+            settleBoardInk()
+            shareLiveChanges()
+        }
+    }
+
+    func toggleLive() {
+        if live != nil { stopLive() } else { startLive() }
+    }
+
+    private func startLive() {
+        guard let roomId = note?.id else { return }
+        liveOutbox = DrawLiveOutbox(roomId: roomId)
+        live = DrawLive.shared.joining(roomId: roomId)
+        liveBridge.join(roomId: roomId)
+        liveHandles = [
+            liveBridge.observeRoom(roomId: roomId) { [weak self] room in
+                if let room { self?.onLiveRoom(room) }
+            },
+            liveBridge.observeEvents(roomId: roomId) { [weak self] event in self?.onLiveEvent(event) }
+        ]
+        liveStream = drawing.$overlay
+            .map { session -> AnyPublisher<DrawEditorState, Never> in
+                session?.$state.eraseToAnyPublisher() ?? Empty().eraseToAnyPublisher()
+            }
+            .switchToLatest()
+            .sink { [weak self] state in self?.streamLive(state) }
+    }
+
+    private func stopLive() {
+        guard let room = live else { return }
+        liveHandles.forEach { $0.close() }
+        liveHandles = []
+        liveStream = nil
+        liveOutbox = nil
+        liveBridge.leave(roomId: room.roomId)
+        live = nil
+    }
+
+    private func onLiveRoom(_ room: DrawLiveRoom) {
+        guard let previous = live else { return }
+        live = room
+        if room.syncRevision > previous.syncRevision { syncBridge.nudge() }
+        claimLivePage()
+    }
+
+    private func onLiveEvent(_ event: DrawLiveEvent) {
+        guard let remote = event as? DrawLiveEvent.Op, let session = drawing.overlaySession(create: true) else { return }
+        remoteDepth += 1
+        session.dispatch(DrawCommands.shared.applyRemote(op: remote.op))
+        remoteDepth -= 1
+    }
+
+    private func streamLive(_ state: DrawEditorState) {
+        guard let room = live, let outbox = liveOutbox else { return }
+        let page = DrawLive.shared.inputPage(room: room)
+        for request in outbox.next(state: state, pageId: page, now: Self.nowMillis()) {
+            liveBridge.send(request: request)
+        }
+        if !state.isDrawing { claimLivePage() }
+    }
+
+    private func claimLivePage() {
+        guard let room = live, let outbox = liveOutbox else { return }
+        let focused = commands.pageForSpawn(state: canvas)?.id
+        let busy = drawing.overlay?.current.isDrawing ?? false
+        let requests = outbox.claims(
+            room: room,
+            focusedPageId: focused,
+            drawing: drawing.isOverlayActive(),
+            busy: busy,
+            now: Self.nowMillis()
+        )
+        for request in requests {
+            liveBridge.send(request: request)
+        }
+    }
+
+    private func shareLiveChanges() {
+        guard let roomId = live?.roomId else { return }
+        claimLivePage()
+        syncBridge.nudge()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.liveSyncDelay) { [weak self] in
+            self?.liveBridge.send(request: DrawLiveRequest.Sync(roomId: roomId))
+        }
+    }
+
+    private static func nowMillis() -> Int64 {
+        Int64(Date().timeIntervalSince1970 * 1000)
+    }
+
+    private func settleBoardInk() {
+        let ink = DrawBoardInk.shared
+        guard let overlay = DrawNoteContents.shared.overlayOf(contents: noteContents),
+              ink.hasLooseInk(overlay: overlay, document: canvas.document) else { return }
+        edit(NoteEditKind.drawing) {
+            if ink.needsPage(overlay: overlay, document: canvas.document) { _ = addBarePage(housekeeping: false) }
+            let settlement = ink.settle(
+                overlay: overlay,
+                document: canvas.document,
+                position: DrawNoteContents.shared.nextPosition(contents: noteContents)
+            )
+            if settlement.overlay.drawing != overlay.drawing { updateContent(settlement.overlay) }
+            for block in settlement.blocks {
+                addContent(block.content)
+                onCanvasIntent(commands.addNode(node: block.node))
+            }
         }
     }
 

@@ -76,6 +76,7 @@ fun NoteDrawingBlock(
     val shape = RoundedCornerShape(8.dp)
     val state = session.state.collectAsState()
     val paperAspect by remember(session) { derivedStateOf { DrawCommands.paperAspect(state.value) } }
+    val transparent by remember(session) { derivedStateOf { DrawCommands.isTransparent(state.value) } }
     val navigator = remember(session) { DrawingSessionNavigator(session) }
     val input = if (active) {
         Modifier.drawingInput(session, navigator = if (DrawCommands.navigates(session.current)) navigator else null)
@@ -97,7 +98,13 @@ fun NoteDrawingBlock(
                 .fillMaxWidth()
                 .height(maxWidth * aspect)
                 .clip(shape)
-                .border(if (active) 1.5.dp else 1.dp, if (active) colors.accent else colors.divider, shape)
+                .then(
+                    when {
+                        active -> Modifier.border(1.5.dp, colors.accent, shape)
+                        transparent -> Modifier
+                        else -> Modifier.border(1.dp, colors.divider, shape)
+                    }
+                )
         ) {
             DrawingFrame(content = content, session = session, modifier = Modifier.fillMaxSize(), input = input)
             if (active) {

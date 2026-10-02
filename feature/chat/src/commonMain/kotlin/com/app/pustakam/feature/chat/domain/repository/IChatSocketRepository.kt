@@ -35,4 +35,8 @@ interface IChatSocketRepository {
     fun sendTyping(payload: SocketTypingPayload): Boolean
 
     fun sendRead(frameId: String, payload: SocketReadPayload): Boolean
+
+    val frames: SharedFlow<String>
+
+    fun sendFrame(frame: String): Boolean
 }
