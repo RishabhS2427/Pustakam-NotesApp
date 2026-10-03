@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -28,12 +29,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.IosShare   // 🔧 20-Jul-2026: export action
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SaveAs
@@ -51,8 +54,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -147,6 +148,7 @@ fun NoteEditorScreen(
     val context = LocalContext.current
 
     var showExportMenu by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     var shareNoteId by remember { mutableStateOf<String?>(null) }
     var isExporting by remember { mutableStateOf(false) }
     val exportScope = rememberCoroutineScope()
@@ -249,106 +251,96 @@ fun NoteEditorScreen(
         onRefresh = { noteEditorViewModel.refresh(id) },
         readOnly = access.readOnly,
         state = state, topBar = {
-        TopAppBar(title = {
-            access.label?.let { Text(it, style = typography.labelLarge, color = colorScheme.onSurfaceVariant) }
-        }, colors = TopAppBarDefaults.topAppBarColors(
-            colorScheme.background,
-        ) ,
-            actions = {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colorScheme.background)
+        ) {
+            // Line 1 — back arrow, flush left, plus the share-access label
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { noteEditorViewModel.changeNoteStatus(NoteStatus.onBackPress) }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+                access.label?.let { Text(it, style = typography.labelLarge, color = colorScheme.onSurfaceVariant) }
+            }
+            // Line 2 — pinned action icons touching the back button above, overflow (3-dot) on the right
             val noteHistory = noteEditorViewModel.history.collectAsStateWithLifecycle().value
-            if (!access.readOnly) {
-                IconButton(onClick = { noteEditorViewModel.drawing.toggleOverlay() }) {
-                    Icon(
-                        imageVector = Icons.Filled.Edit,
-                        contentDescription = "Draw on note",
-                        tint = if (drawingTarget != null && drawingTarget == noteEditorViewModel.drawing.overlayId()) {
-                            colorScheme.primary
-                        } else {
-                            LocalContentColor.current
-                        }
-                    )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp)
+            ) {
+                if (!access.readOnly) {
+                    IconButton(onClick = { noteEditorViewModel.undo() }, enabled = noteHistory.canUndo, modifier = Modifier.size(40.dp)) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                    }
+                    IconButton(onClick = { noteEditorViewModel.redo() }, enabled = noteHistory.canRedo, modifier = Modifier.size(40.dp)) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                    }
                 }
                 IconButton(
-                onClick = { noteEditorViewModel.undo() },
-                enabled = noteHistory.canUndo
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Undo,
-                    contentDescription = "Undo",
-                )
-            }
-            IconButton(
-                onClick = { noteEditorViewModel.redo() },
-                enabled = noteHistory.canRedo
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Redo,
-                    contentDescription = "Redo",
-                )
-            }
-            }
-
-                IconButton(
-                    onClick = {
-                        noteEditorViewModel.openWorkspace { noteId -> navigateTo(Route.MasterEditor + "/$noteId") }
-                    }
+                    onClick = { noteEditorViewModel.openWorkspace { noteId -> navigateTo(Route.MasterEditor + "/$noteId") } },
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
                         painterResource(com.app.pustakam.android.R.drawable.workspace),
                         contentDescription = "MasterEditor",
-                        Modifier.size(24.dp)
+                        Modifier.size(22.dp)
                     )
                 }
-
-            IconButton(onClick = {
-                    state.value.note?.id?.let {
-                        navigateTo(Route.NoteBookReader + "/${it}")
+                IconButton(
+                    onClick = { state.value.note?.id?.let { navigateTo(Route.NoteBookReader + "/${it}") } },
+                    enabled = noteEditorViewModel.isNoteValid(),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(imageVector = Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Open as book")
+                }
+                if (!access.readOnly) {
+                    IconButton(onClick = { noteEditorViewModel.drawing.toggleOverlay() }, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = "Draw on note",
+                            tint = if (drawingTarget != null && drawingTarget == noteEditorViewModel.drawing.overlayId()) {
+                                colorScheme.primary
+                            } else {
+                                LocalContentColor.current
+                            }
+                        )
                     }
-            }, enabled = noteEditorViewModel.isNoteValid()
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                    contentDescription = "Open as book",
-                )
-            }
-
-            Box {
-                IconButton(onClick = { showExportMenu = true }, enabled = !isExporting) {
-                    Icon(imageVector = Icons.Filled.IosShare, contentDescription = "Export note")
                 }
-                DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) {
-                    DropdownMenuItem(text = { Text("Export as PDF") }, onClick = {
-                        showExportMenu = false; runExport(ExportFormat.PDF)
-                    })
-                    DropdownMenuItem(text = { Text("Export as Image") }, onClick = {
-                        showExportMenu = false; runExport(ExportFormat.IMAGE)
-                    })
-                    DropdownMenuItem(text = { Text("Export as Word (DOCX)") }, onClick = {
-                        showExportMenu = false; runExport(ExportFormat.DOCX)
-                    })
+                Spacer(modifier = Modifier.weight(1f))
+                Box {
+                    IconButton(onClick = { showOverflowMenu = true }, modifier = Modifier.size(40.dp)) {
+                        Icon(imageVector = Icons.Default.MoreVert, contentDescription = "More actions")
+                    }
+                    DropdownMenu(expanded = showOverflowMenu, onDismissRequest = { showOverflowMenu = false }) {
+                        DropdownMenuItem(text = { Text("Export as PDF") }, enabled = !isExporting, onClick = {
+                            showOverflowMenu = false; runExport(ExportFormat.PDF)
+                        })
+                        DropdownMenuItem(text = { Text("Export as Image") }, enabled = !isExporting, onClick = {
+                            showOverflowMenu = false; runExport(ExportFormat.IMAGE)
+                        })
+                        DropdownMenuItem(text = { Text("Export as Word (DOCX)") }, enabled = !isExporting, onClick = {
+                            showOverflowMenu = false; runExport(ExportFormat.DOCX)
+                        })
+                        if (access.canShare) DropdownMenuItem(text = { Text("Share with people") }, onClick = {
+                            showOverflowMenu = false
+                            noteEditorViewModel.openWorkspace { noteId -> shareNoteId = noteId }
+                        })
+                        if (!access.readOnly) DropdownMenuItem(text = { Text("Save") }, onClick = {
+                            showOverflowMenu = false; noteEditorViewModel.createOrUpdateNote()
+                        })
+                        if (stateEditor.showDeleteButton && access.canDeleteNote) DropdownMenuItem(text = {
+                            Text("Delete", color = colorScheme.error)
+                        }, onClick = {
+                            showOverflowMenu = false; noteEditorViewModel.askDeleteNote()
+                        })
+                    }
                 }
             }
-            if (!access.readOnly) IconButton(onClick = noteEditorViewModel::createOrUpdateNote) {
-                Icon(
-                    imageVector = Icons.Filled.Save,
-                    contentDescription = "Save",
-                )
-            }
-            if (access.canShare) IconButton(onClick = { noteEditorViewModel.openWorkspace { noteId -> shareNoteId = noteId } }) {
-                Icon(
-                    Icons.Default.Share,
-                    contentDescription = "Share Note",
-                )
-            }
-            if (stateEditor.showDeleteButton && access.canDeleteNote) IconButton(onClick = {
-                noteEditorViewModel.askDeleteNote()
-            }) {
-                Icon(
-                    Icons.Default.Delete, tint = colorScheme.error,
-                    contentDescription = "Delete a note",
-                )
-            }
-        })
+        }
     }, onButtonOverLays = {
         val configuration = LocalConfiguration.current
         if (drawingTarget == null && !access.readOnly) Box(Modifier.fillMaxSize()) {
@@ -536,7 +528,7 @@ fun NotesEditor(
                         }
                         TextField(
                             value = state.value.titleTextState.value,
-                            textStyle = typography.headlineLarge,
+                            textStyle = typography.headlineMedium,
                             placeholder = {
                                 Text(
                                     "Title : Keep your thoughts alive.",

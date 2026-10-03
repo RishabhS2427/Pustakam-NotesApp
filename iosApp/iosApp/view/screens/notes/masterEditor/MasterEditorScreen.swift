@@ -75,6 +75,29 @@ struct MasterEditorScreen: View {
                 onPermissionDenied: { viewModel.onPermissionDenied($0) }
             )
         )
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                BackButton(action: { dismiss() })
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack{
+                    if let label = viewModel.access.label {
+                                   Text(label)
+                                       .font(.system(size: 14))
+                                       .foregroundColor(palette.onSurfaceMuted)
+                                       .padding(.horizontal, 4)
+                               }
+                    if viewModel.access.canShare {
+                        ActionButtonWithoutBackground(iconName: "person.badge.plus", action: {
+                            shareTarget = viewModel.note.map { ShareNoteTarget(id: $0.id) }
+                        }, tint: Theme.Colors.secondary)
+                        .accessibilityLabel(Text("Share a copy"))
+                    }
+                }.alignmentGuide(VerticalAlignment.center) { _ in 0.5 }
+            }
+        }
         .sheet(item: $shareTarget) { target in ShareNoteSheet(noteId: target.id) }
         .sheet(isPresented: Binding(
             get: { sheet.isPresented },
@@ -256,12 +279,6 @@ struct MasterEditorScreen: View {
 
     private var zoomBar: some View {
         HStack(spacing: 4) {
-            if let label = viewModel.access.label {
-                Text(label)
-                    .font(.system(size: 13))
-                    .foregroundColor(palette.onSurfaceMuted)
-                    .padding(.horizontal, 8)
-            }
             if !readOnly {
             barButton(icon: DrawingIcons.undo, tint: viewModel.history.canUndo ? palette.onSurface : palette.onSurfaceMuted) {
                 viewModel.undo()
@@ -300,12 +317,6 @@ struct MasterEditorScreen: View {
                 Text("\(live.members.count)")
                     .font(.system(size: 13))
                     .foregroundColor(palette.accent)
-            }
-            if viewModel.access.canShare {
-            barButton(icon: "person.badge.plus", tint: palette.onSurface) {
-                shareTarget = viewModel.note.map { ShareNoteTarget(id: $0.id) }
-            }
-            .accessibilityLabel(Text("Share a copy"))
             }
             if !readOnly {
             barButton(icon: "plus.square.on.square", tint: palette.accent) {

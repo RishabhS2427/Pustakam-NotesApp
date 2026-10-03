@@ -33,13 +33,15 @@ struct NoteEditorView: View {
         isNewNote = noteId == nil
     }
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        VStack(spacing: 0) {
+            header
+            ZStack(alignment: .topLeading) {
             ScrollView(.vertical){
             VStack(alignment: .leading) {
                 NoteTextEditor(
                     text: $noteEditorViewModel.state.title,   // 🔧 title owned by VM → actually saved
                     placeholder: "Title : Keep your thoughts alive.",
-                    fontSize: 30,   // 🔧 25-Sep-2026 — matches Android's title (typography.headlineLarge: 30sp Bold)
+                    fontSize: 24,
                     fontWeight: .bold
                 ).frame(minHeight: 20, maxHeight:.infinity)
                 .disabled(access.readOnly)
@@ -81,6 +83,7 @@ struct NoteEditorView: View {
                 .padding()
             }
             drawingChrome
+            }
         }
         .editorCapabilities(
             state: noteEditorViewModel.capabilities,
@@ -134,83 +137,7 @@ struct NoteEditorView: View {
         }
         .padding(.horizontal, 12)
         .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                if let label = access.label {
-                    Text(label).font(.caption).foregroundColor(Theme.Colors.secondary)
-                }
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                BackButton(action: {
-                    if noteEditorViewModel.drawing.target != nil {
-                        noteEditorViewModel.drawing.stop()
-                    } else {
-                        dismiss()
-                    }
-                })
-            }
-            
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack{
-                    if !access.readOnly {
-                    ActionButtonWithoutBackground(iconName: DrawingIcons.draw,
-                                                  action: {
-                        noteEditorViewModel.drawing.toggleOverlay()
-                    }, tint: overlayActive ? Theme.Colors.primary : Theme.Colors.secondary)
-                    }
-                    ActionButtonWithoutBackground(iconName: "workspace",
-                                                  action: {
-                        // flush first: the canvas reads the note from the db on open,
-                        // so navigating before the write lands shows stale text
-                        noteEditorViewModel.openWorkspace { noteId in
-                            router.navigate(to: .MasterEditor(noteId: noteId))
-                        }
-                    }, tint: Theme.Colors.secondary)
-                    
-                    if !access.readOnly {
-                    ActionButtonWithoutBackground(iconName: "arrow.uturn.backward",
-                                                  enabled : noteEditorViewModel.canUndo,
-                                                  action: {
-                        noteEditorViewModel.undo()
-                    }, tint: Theme.Colors.secondary)
-                    ActionButtonWithoutBackground(iconName: "arrow.uturn.forward",
-                                                  enabled : noteEditorViewModel.canRedo,
-                                                  action: {
-                        noteEditorViewModel.redo()
-                    }, tint: Theme.Colors.secondary)
-                    }
-                    ActionButtonWithoutBackground(iconName: "book",
-                                                  enabled : noteEditorViewModel.isNoteValid(),
-                                                  action: {
-                        if let noteId = noteEditorViewModel.state.note?.id {
-                            noteEditorViewModel.saveThenOpen {
-                                router.navigate(to: .NoteBookReader(noteId: noteId))
-                            }
-                        }
-                    }, tint: Theme.Colors.secondary)
-                    ActionButtonWithoutBackground(iconName: "square.and.arrow.up.on.square", action: {
-                        showExportOptions = true
-                    }, tint: Theme.Colors.secondary)
-                    if access.canShare {
-                    ActionButtonWithoutBackground(iconName: "person.badge.plus", action: {
-                        noteEditorViewModel.openWorkspace { noteId in
-                            shareTarget = ShareNoteTarget(id: noteId)
-                        }
-                    }, tint: Theme.Colors.secondary)
-                    }
-                    if !access.readOnly {
-                    ActionButtonWithoutBackground(iconName: "tray.and.arrow.down", action: {
-                        saveNote()
-                    }, tint :Theme.Colors.secondary)
-                    }
-                    if access.canDeleteNote {
-                        ActionButtonWithoutBackground(iconName: "trash", action: {
-                            setAlert(message: "Are you sure you want to delete this note?", title: "Delete note", alertType: .DELETE )
-                        }, tint: Color.red)
-                    }
-                }
-            }
-        }
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $shareTarget) { target in ShareNoteSheet(noteId: target.id) }
         .onDisappear { noteEditorViewModel.saveIfChanged() }
         .onAppear { noteEditorViewModel.refresh() }
@@ -227,8 +154,80 @@ struct NoteEditorView: View {
             )
         ) { _ in noteEditorViewModel.saveIfChanged() }
     }
-    
-    
+
+    @ViewBuilder
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                BackButton(action: {
+                    if noteEditorViewModel.drawing.target != nil {
+                        noteEditorViewModel.drawing.stop()
+                    } else {
+                        dismiss()
+                    }
+                })
+                if let label = access.label {
+                    Text(label).font(.caption).foregroundColor(Theme.Colors.secondary)
+                }
+                Spacer()
+            }
+            HStack(spacing: 0) {
+                if !access.readOnly {
+                    ActionButtonWithoutBackground(iconName: "arrow.uturn.backward",
+                                                  enabled: noteEditorViewModel.canUndo,
+                                                  action: { noteEditorViewModel.undo() },
+                                                  tint: Theme.Colors.secondary)
+                    ActionButtonWithoutBackground(iconName: "arrow.uturn.forward",
+                                                  enabled: noteEditorViewModel.canRedo,
+                                                  action: { noteEditorViewModel.redo() },
+                                                  tint: Theme.Colors.secondary)
+                }
+                ActionButtonWithoutBackground(iconName: "workspace", action: {
+                    noteEditorViewModel.openWorkspace { noteId in
+                        router.navigate(to: .MasterEditor(noteId: noteId))
+                    }
+                }, tint: Theme.Colors.secondary)
+                ActionButtonWithoutBackground(iconName: "book",
+                                              enabled: noteEditorViewModel.isNoteValid(),
+                                              action: {
+                    if let noteId = noteEditorViewModel.state.note?.id {
+                        noteEditorViewModel.saveThenOpen {
+                            router.navigate(to: .NoteBookReader(noteId: noteId))
+                        }
+                    }
+                }, tint: Theme.Colors.secondary)
+                if !access.readOnly {
+                    ActionButtonWithoutBackground(iconName: DrawingIcons.draw, action: {
+                        noteEditorViewModel.drawing.toggleOverlay()
+                    }, tint: overlayActive ? Theme.Colors.primary : Theme.Colors.secondary)
+                }
+                Spacer()
+                Menu {
+                    Button("Export note") { showExportOptions = true }
+                    if access.canShare {
+                        Button("Share with people") {
+                            noteEditorViewModel.openWorkspace { noteId in
+                                shareTarget = ShareNoteTarget(id: noteId)
+                            }
+                        }
+                    }
+                    if !access.readOnly {
+                        Button("Save") { saveNote() }
+                    }
+                    if access.canDeleteNote {
+                        Button("Delete", role: .destructive) {
+                            setAlert(message: "Are you sure you want to delete this note?", title: "Delete note", alertType: .DELETE)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundColor(Theme.Colors.secondary)
+                        .frame(width: 40, height: 40)
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private func contentRow(_ content: NoteContentModel) -> some View {
         let notes = DrawNoteContents.shared

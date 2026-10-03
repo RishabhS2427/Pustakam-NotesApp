@@ -1,5 +1,6 @@
 package com.app.pustakam.android.screen.masterEditor
 
+import android.content.res.Resources
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -44,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -266,13 +268,6 @@ fun MasterEditorScreen(
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             val readOnly = uiState.access.readOnly
-            uiState.access.label?.let {
-                Text(
-                    text = it,
-                    style = TextStyle(color = colors.onSurfaceMuted, fontSize = 13.sp),
-                    modifier = Modifier.padding(horizontal = 8.dp)
-                )
-            }
             if (!readOnly) IconButton(onClick = viewModel::undo, enabled = uiState.history.canUndo) {
                 Icon(
                     Icons.AutoMirrored.Filled.Undo,
@@ -349,10 +344,28 @@ fun MasterEditorScreen(
                     style = TextStyle(color = colors.accent, fontSize = 13.sp)
                 )
             }
-            if (uiState.access.canShare) IconButton(onClick = { shareNoteId = uiState.note?.id }) {
-                Icon(Icons.Default.PersonAdd, contentDescription = "Share a copy", tint = colors.onSurface)
+        }
+        Row(modifier = Modifier
+            .align(Alignment.TopEnd)
+            .statusBarsPadding()
+            .padding(top = 4.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            uiState.access.label?.let {
+                Text(
+                    text = it,
+                    style = TextStyle(color = colors.onSurfaceMuted, fontSize = 13.sp),
+                    modifier = Modifier.padding(horizontal = 8.dp).statusBarsPadding()
+                )
+            }
+            if (uiState.access.canShare) {
+                IconButton(
+                    onClick = { shareNoteId = uiState.note?.id },
+                ) {
+                    Icon(Icons.Default.PersonAdd, contentDescription = "Share a copy", tint = colors.onSurface)
+                }
             }
         }
+
         shareNoteId?.let { noteId -> ShareNoteSheet(noteId = noteId, onDismiss = { shareNoteId = null }) }
         val drawingSession = viewModel.drawing.active()
         if (drawingTarget != null && drawingSession != null) {
