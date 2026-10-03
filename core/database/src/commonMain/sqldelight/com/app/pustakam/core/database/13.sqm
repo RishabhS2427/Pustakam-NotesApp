@@ -1,0 +1,8 @@
+CREATE TABLE SharedNote (
+ noteId TEXT NOT NULL PRIMARY KEY,
+ shareId TEXT NOT NULL,
+ role TEXT NOT NULL,
+ ownerId TEXT NOT NULL,
+ ownerName TEXT,
+ authors TEXT NOT NULL DEFAULT '{}'
+);

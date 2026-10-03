@@ -68,6 +68,17 @@ data class ChatAttachment(
 
     fun needsUpload(): Boolean = assetId.isNullOrBlank() && !localPath.isNullOrBlank()
     fun needsDownload(): Boolean = !assetId.isNullOrBlank() && localPath.isNullOrBlank()
+
+    fun sharedNoteId(): String? = NoteShareLink.noteIdOf(this)
+}
+
+object NoteShareLink {
+    const val PREFIX = "pustakam://note/"
+
+    fun noteIdOf(attachment: ChatAttachment): String? = attachment.url
+        .takeIf { attachment.contentType == ContentType.LINK && it.startsWith(PREFIX) }
+        ?.removePrefix(PREFIX)
+        ?.takeIf { it.isNotBlank() }
 }
 
 /**
@@ -138,9 +149,11 @@ data class ChatMessage(
     fun hasBody(): Boolean = text.isNotBlank() || attachments.isNotEmpty()
 
     fun mediaContents(): List<NoteContentModel.MediaContent> =
-        attachments.mapIndexed { index, attachment ->
-            attachment.toMediaContent(conversationId, "$id-$index", index)
+        attachments.mapIndexedNotNull { index, attachment ->
+            attachment.takeIf { it.sharedNoteId() == null }?.toMediaContent(conversationId, "$id-$index", index)
         }
+
+    fun sharedNotes(): List<ChatAttachment> = attachments.filter { it.sharedNoteId() != null }
 }
 
 @Serializable

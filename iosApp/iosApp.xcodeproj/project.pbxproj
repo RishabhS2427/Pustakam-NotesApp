@@ -166,6 +166,10 @@
 		D7A0C0DE0000000000000113 /* BookReaderAnnotations.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000112 /* BookReaderAnnotations.swift */; };
 		D7A0C0DE0000000000000115 /* DrawingBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000114 /* DrawingBlockView.swift */; };
 		D7A0C0DE0000000000000118 /* ImageAnnotationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000117 /* ImageAnnotationViewModel.swift */; };
+		D7A0C0DE000000000000011B /* ShareNoteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE000000000000011A /* ShareNoteSheet.swift */; };
+		D7A0C0DE000000000000011D /* ShareNoteViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE000000000000011C /* ShareNoteViewModel.swift */; };
+		D7A0C0DE000000000000011F /* ChatShareViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE000000000000011E /* ChatShareViewModel.swift */; };
+		D7A0C0DE0000000000000121 /* ShareToChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A0C0DE0000000000000120 /* ShareToChatSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -363,6 +367,10 @@
 		D7A0C0DE0000000000000112 /* BookReaderAnnotations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookReaderAnnotations.swift; sourceTree = "<group>"; };
 		D7A0C0DE0000000000000114 /* DrawingBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingBlockView.swift; sourceTree = "<group>"; };
 		D7A0C0DE0000000000000117 /* ImageAnnotationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAnnotationViewModel.swift; sourceTree = "<group>"; };
+		D7A0C0DE000000000000011A /* ShareNoteSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareNoteSheet.swift; sourceTree = "<group>"; };
+		D7A0C0DE000000000000011C /* ShareNoteViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareNoteViewModel.swift; sourceTree = "<group>"; };
+		D7A0C0DE000000000000011E /* ChatShareViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatShareViewModel.swift; sourceTree = "<group>"; };
+		D7A0C0DE0000000000000120 /* ShareToChatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareToChatSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -914,6 +922,7 @@
 				8B023D68CAFE421A86322695 /* smartText */,
 				22D196BC30283E37000CF5F1 /* masterEditor */,
 				D7A0C0DE0000000000000116 /* drawing */,
+				D7A0C0DE0000000000000119 /* share */,
 			);
 			path = widgets;
 			sourceTree = "<group>";
@@ -1077,6 +1086,17 @@
 				D7A0C0DE000000000000010E /* DrawingPanels.swift */,
 			);
 			path = drawing;
+			sourceTree = "<group>";
+		};
+		D7A0C0DE0000000000000119 /* share */ = {
+			isa = PBXGroup;
+			children = (
+				D7A0C0DE000000000000011A /* ShareNoteSheet.swift */,
+				D7A0C0DE000000000000011C /* ShareNoteViewModel.swift */,
+				D7A0C0DE000000000000011E /* ChatShareViewModel.swift */,
+				D7A0C0DE0000000000000120 /* ShareToChatSheet.swift */,
+			);
+			path = share;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1314,6 +1334,10 @@
 				22A0ABB9301B419400B2817C /* OrientationManager.swift in Sources */,
 				2287BB29300D69F800F6D3E2 /* ImagePreviewView.swift in Sources */,
 				D7A0C0DE0000000000000118 /* ImageAnnotationViewModel.swift in Sources */,
+				D7A0C0DE000000000000011B /* ShareNoteSheet.swift in Sources */,
+				D7A0C0DE000000000000011D /* ShareNoteViewModel.swift in Sources */,
+				D7A0C0DE000000000000011F /* ChatShareViewModel.swift in Sources */,
+				D7A0C0DE0000000000000121 /* ShareToChatSheet.swift in Sources */,
 				63C00BE92CEC945900A4907C /* RulledPage.swift in Sources */,
 				63C00BEF2CECC6FF00A4907C /* ActionButton.swift in Sources */,
 				2287BB44301014C500F6D3E2 /* QuickActionCard.swift in Sources */,

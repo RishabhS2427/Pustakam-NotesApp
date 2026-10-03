@@ -53,6 +53,7 @@ fun BookReaderScreen(
 ) {
     val state by viewModel.bookUiState.collectAsStateWithLifecycle()
     val drawingTarget by viewModel.drawing.target.collectAsStateWithLifecycle()
+    val canAnnotate by viewModel.canAnnotate.collectAsStateWithLifecycle()
     val annotation = viewModel.drawing.overlay.collectAsStateWithLifecycle().value
     val annotating = drawingTarget != null && drawingTarget == viewModel.drawing.overlayId()
     val inkCaptures = rememberCapturesTouches(annotation)
@@ -122,7 +123,7 @@ fun BookReaderScreen(
             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close document", tint = colorScheme.secondary)
         }
         if (state.pages.isNotEmpty()) {
-            IconButton(
+            if (canAnnotate) IconButton(
                 onClick = { viewModel.drawing.toggleOverlay() },
                 modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 54.dp)
             ) {

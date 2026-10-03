@@ -54,7 +54,8 @@ fun MasterNodeContent(
     onOpenMedia: () -> Unit,
     onDelete: () -> Unit = {},
     keyboardInsetPx: Float = 0f,
-    drawingSession: DrawingSession? = null
+    drawingSession: DrawingSession? = null,
+    readOnly: Boolean = false
 ) {
     val colors = SmartTextTokens.colors
     when  {
@@ -72,7 +73,7 @@ fun MasterNodeContent(
                     scale = scale,
                     scrollable = false,
                     minLines = 5,
-                    readOnly = false,
+                    readOnly = readOnly,
                     onIntent = onTextIntent,
                     keyboardInsetPx = if (isEditing) keyboardInsetPx else 0f,
                     shouldFocus = isEditing,

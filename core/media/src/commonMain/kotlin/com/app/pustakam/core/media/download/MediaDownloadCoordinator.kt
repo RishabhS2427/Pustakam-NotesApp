@@ -26,6 +26,8 @@ import kotlinx.coroutines.launch
 // 🔄 how often a waiting card asks the server again — 10s keeps well under the sync rate limit
 private const val WAITING_CHECK_MILLIS = 10_000L
 
+private const val MEDIA_SEGMENT = "/media/"
+
 class MediaDownloadCoordinator(
     private val manager: MediaDownloadManager,
     private val prefs: IAppPreferences,
@@ -141,7 +143,7 @@ class MediaDownloadCoordinator(
     private fun requestFor(content: NoteContentModel.MediaContent): MediaDownloadRequest? {
         val assetId = content.assetId?.takeIf { it.isNotBlank() } ?: return null
         if (!content.localPath.isNullOrBlank() && !isLocalFileMissing(content)) return null
-        val ownerId = prefs.currentUserId().takeIf { it.isNotBlank() } ?: return null
+        val ownerId = ownerOf(content.url, assetId) ?: prefs.currentUserId().takeIf { it.isNotBlank() } ?: return null
         return MediaDownloadRequest(
             assetId = assetId,
             ownerId = ownerId,
@@ -149,6 +151,12 @@ class MediaDownloadCoordinator(
             destinationRelativePath = destinationFor(content, assetId),
             expectedBytes = content.sizeBytes,
         )
+    }
+
+    private fun ownerOf(url: String, assetId: String): String? {
+        val path = url.substringAfter(MEDIA_SEGMENT, missingDelimiterValue = "")
+        val owner = path.substringBefore('/', missingDelimiterValue = "")
+        return owner.takeIf { it.isNotBlank() && path.removePrefix("$owner/").startsWith(assetId) }
     }
 
     private fun destinationFor(content: NoteContentModel.MediaContent, assetId: String): String =

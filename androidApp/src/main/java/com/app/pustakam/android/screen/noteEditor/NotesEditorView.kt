@@ -79,6 +79,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.LocalContentColor
 import com.app.pustakam.android.widgets.drawing.DrawingCanvas
 import com.app.pustakam.android.widgets.drawing.DrawingChrome
+import com.app.pustakam.android.widgets.share.ShareNoteSheet
 import com.app.pustakam.core.drawing.note.DrawNoteContents
 import com.app.pustakam.android.widgets.drawing.drawingInput
 import androidx.compose.ui.platform.LocalFocusManager
@@ -146,6 +147,7 @@ fun NoteEditorScreen(
     val context = LocalContext.current
 
     var showExportMenu by remember { mutableStateOf(false) }
+    var shareNoteId by remember { mutableStateOf<String?>(null) }
     var isExporting by remember { mutableStateOf(false) }
     val exportScope = rememberCoroutineScope()
     val runExport: (ExportFormat) -> Unit = { format ->
@@ -203,6 +205,7 @@ fun NoteEditorScreen(
         noteEditorViewModel.changeNoteStatus(NoteStatus.onBackPress)
     }
     val drawingTarget = noteEditorViewModel.drawing.target.collectAsStateWithLifecycle().value
+    val access = noteEditorViewModel.access.collectAsStateWithLifecycle().value
     BackHandler(enabled = drawingTarget != null) {
         noteEditorViewModel.drawing.stop()
     }
@@ -244,14 +247,16 @@ fun NoteEditorScreen(
     NotesEditor(
         isRefreshing = stateEditor.isRefreshing,
         onRefresh = { noteEditorViewModel.refresh(id) },
+        readOnly = access.readOnly,
         state = state, topBar = {
         TopAppBar(title = {
-
+            access.label?.let { Text(it, style = typography.labelLarge, color = colorScheme.onSurfaceVariant) }
         }, colors = TopAppBarDefaults.topAppBarColors(
             colorScheme.background,
         ) ,
             actions = {
             val noteHistory = noteEditorViewModel.history.collectAsStateWithLifecycle().value
+            if (!access.readOnly) {
                 IconButton(onClick = { noteEditorViewModel.drawing.toggleOverlay() }) {
                     Icon(
                         imageVector = Icons.Filled.Edit,
@@ -280,6 +285,7 @@ fun NoteEditorScreen(
                     imageVector = Icons.AutoMirrored.Filled.Redo,
                     contentDescription = "Redo",
                 )
+            }
             }
 
                 IconButton(
@@ -322,19 +328,19 @@ fun NoteEditorScreen(
                     })
                 }
             }
-            IconButton(onClick = noteEditorViewModel::createOrUpdateNote) {
+            if (!access.readOnly) IconButton(onClick = noteEditorViewModel::createOrUpdateNote) {
                 Icon(
                     imageVector = Icons.Filled.Save,
                     contentDescription = "Save",
                 )
             }
-            IconButton(onClick = noteEditorViewModel::shareNote) {
+            if (access.canShare) IconButton(onClick = { noteEditorViewModel.openWorkspace { noteId -> shareNoteId = noteId } }) {
                 Icon(
                     Icons.Default.Share,
                     contentDescription = "Share Note",
                 )
             }
-            if (stateEditor.showDeleteButton) IconButton(onClick = {
+            if (stateEditor.showDeleteButton && access.canDeleteNote) IconButton(onClick = {
                 noteEditorViewModel.askDeleteNote()
             }) {
                 Icon(
@@ -345,7 +351,7 @@ fun NoteEditorScreen(
         })
     }, onButtonOverLays = {
         val configuration = LocalConfiguration.current
-        if (drawingTarget == null) Box(Modifier.fillMaxSize()) {
+        if (drawingTarget == null && !access.readOnly) Box(Modifier.fillMaxSize()) {
             OverLayEditorButtons(
                 modifier = Modifier.align(alignment = Alignment.BottomEnd),
                 onAddTextField = {
@@ -392,6 +398,7 @@ fun NoteEditorScreen(
                             RenderWidget(
                                 content = contentValue,
                                 paired = paired,
+                                readOnly = access.readOnly,
                                 focusRequester = focusRequester,
                                 onUpdate = { value ->
                                     noteEditorViewModel.updateContent(index, value)
@@ -411,7 +418,8 @@ fun NoteEditorScreen(
                                         (contentValue as NoteContentModel.MediaContent).getMediaUrl(),
                                         contentValue.type,
                                         mediaId = contentValue.id,
-                                        noteId = contentValue.noteId
+                                        noteId = contentValue.noteId,
+                                        readOnly = access.readOnly
                                     )
                                     when {
                                         contentValue.type == ContentType.IMAGE  -> navigateTo(Route.ImagePreview)
@@ -423,7 +431,7 @@ fun NoteEditorScreen(
                                         content = drawing,
                                         session = noteEditorViewModel.drawing.session(drawing),
                                         active = drawingTarget == drawing.id,
-                                        onActivate = { noteEditorViewModel.drawing.start(drawing.id) },
+                                        onActivate = { if (!access.readOnly) noteEditorViewModel.drawing.start(drawing.id) },
                                         onDelete = { noteEditorViewModel.askDeleteContent(drawing.id) }
                                     )
                                 })
@@ -470,6 +478,7 @@ fun NoteEditorScreen(
                         .navigationBarsPadding()
                 )
             }
+            shareNoteId?.let { noteId -> ShareNoteSheet(noteId = noteId, onDismiss = { shareNoteId = null }) }
         }
     })
 
@@ -496,6 +505,7 @@ fun NotesEditor(
     //   further down this file keeps compiling untouched.
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
+    readOnly: Boolean = false,
 ) {
     val isRuledEnabledState = remember { mutableStateOf(false) }
     val focusRequester = rememberFocusRequester()
@@ -545,6 +555,7 @@ fun NotesEditor(
                             onValueChange = {
                                 state.value.titleTextState.value = it
                             },
+                            readOnly = readOnly,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                             keyboardActions = KeyboardActions(onNext = {
                                 focusManager.moveFocus(FocusDirection.Down)
@@ -581,6 +592,7 @@ fun RenderWidget(
     onOpenDocument: () -> Unit = {},   // 🔧 18-Jul-2026: open imported file in the book reader
     drawingSlot: @Composable (NoteContentModel.Drawing) -> Unit = {},
     paired: Boolean = false,
+    readOnly: Boolean = false,
 ) {
     var focusedMediaId by remember { mutableStateOf<String?>(null) }
     val pairedHeight = ((LocalConfiguration.current.screenWidthDp.dp - PAIRED_GUTTER) / 2) * PAIRED_ASPECT
@@ -594,6 +606,7 @@ fun RenderWidget(
                     text = textContent.text,
                     metadata = textContent.metadata,
                     focusRequester = focusRequester,
+                    readOnly = readOnly,
                     onDocumentChange = { onUpdate(RichTextCodec.applyTo(textContent, it)) },
                     modifier = Modifier.padding( 16.dp)
                 )

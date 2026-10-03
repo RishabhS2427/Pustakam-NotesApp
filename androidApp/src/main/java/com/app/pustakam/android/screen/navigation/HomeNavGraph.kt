@@ -81,6 +81,7 @@ fun NavGraphBuilder.HomeNavGraph(navController: PustakmNavController){
                         else -> navController.navigateTo(Route.BookReader + "/$conversationId?contentId=${media.id}")
                     }
                 },
+                onOpenNote = { noteId -> navController.navigateTo(Route.NotesEditor + "/$noteId") },
             )
         }
         composable(

@@ -14,6 +14,7 @@ struct ChatMessageBubbleView: View {
     var onDelete: (ChatMessage) -> Void = { _ in }
     var onOpenMedia: (NoteContentModel.MediaContent) -> Void = { _ in }
     var onOpenDocument: (NoteContentModel.MediaContent) -> Void = { _ in }
+    var onOpenNote: (String) -> Void = { _ in }
 
     @Environment(\.palette) private var palette
 
@@ -36,7 +37,8 @@ struct ChatMessageBubbleView: View {
                 ChatAttachmentsView(
                     message: message,
                     onOpenMedia: onOpenMedia,
-                    onOpenDocument: onOpenDocument
+                    onOpenDocument: onOpenDocument,
+                    onOpenNote: onOpenNote
                 )
 
                 if !message.text.isEmpty {

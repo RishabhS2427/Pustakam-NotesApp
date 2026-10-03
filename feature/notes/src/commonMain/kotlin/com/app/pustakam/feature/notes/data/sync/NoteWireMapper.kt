@@ -13,6 +13,7 @@ object NoteWireMapper {
     fun toWire(note: Note): Note = note.copy(
         deletedAt = null,
         serverUpdatedAt = null,
+        share = null,
         contents = note.contents.map { it.forWire() },
     )
 

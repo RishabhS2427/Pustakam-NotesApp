@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -14,6 +15,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -22,6 +26,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.app.pustakam.android.theme.typography
 import com.app.pustakam.android.widgets.chat.ChatAvatar
 import com.app.pustakam.android.widgets.chat.ChatWidget
+import com.app.pustakam.android.widgets.share.ShareToChatSheet
 import com.app.pustakam.android.screen.navigation.Route
 import com.app.pustakam.core.common.util.ContentType
 import com.app.pustakam.core.common.util.isImage
@@ -37,9 +42,11 @@ fun ChatScreen(
     conversationId: String,
     onBack: () -> Unit,
     onOpenMediaPreview: (NoteContentModel.MediaContent, String) -> Unit = { _, _ -> },
+    onOpenNote: (String) -> Unit = {},
 ) {
     val viewModel: ChatViewModel = viewModel(key = "chat-$conversationId")
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var sharingNote by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = colorScheme.background,
@@ -60,6 +67,11 @@ fun ChatScreen(
                     )
                 },
                 actions = {
+                    if (!state.isAssistantThread) {
+                        IconButton(onClick = { sharingNote = true }) {
+                            Icon(Icons.Filled.Description, contentDescription = "Share a note")
+                        }
+                    }
                     ChatAvatar(
                         label = state.title,
                         avatarUrl = state.conversation?.avatarUrl(),
@@ -83,6 +95,8 @@ fun ChatScreen(
                 if (route.isNotBlank()) onOpenMediaPreview(media, route)
             },
             onOpenDocument = { media -> onOpenMediaPreview(media, Route.BookReader) },
+            onOpenNote = onOpenNote,
         )
     }
+    if (sharingNote) ShareToChatSheet(conversationId = conversationId, onDismiss = { sharingNote = false })
 }

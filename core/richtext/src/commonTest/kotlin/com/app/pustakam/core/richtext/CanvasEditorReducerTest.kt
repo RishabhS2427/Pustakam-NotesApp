@@ -715,4 +715,24 @@ class CanvasEditorReducerTest {
         ).after(CanvasCommands.useLockTool(), CanvasEditorIntent.SetEditing("d1"))
         assertNull(state.editingNodeId)
     }
+
+    @Test
+    fun aViewOnlyBoardPansAndZoomsButNeverChanges() {
+        val editing = board(page("p1", 0f, 0.0), widget("w1", "p1", 24f, 24f, 0.0))
+            .after(CanvasEditorIntent.SetEditing("w1"))
+        val state = CanvasCommands.viewOnly(editing)
+        assertNull(state.editingNodeId)
+        assertTrue(CanvasCommands.isHandTool(state))
+        val touched = state.after(
+            CanvasEditorIntent.BeginDrag("w1"),
+            CanvasEditorIntent.DragBy(40f, 40f),
+            CanvasEditorIntent.BeginResize("w1"),
+            CanvasEditorIntent.ResizeNode("w1", 300f, 300f),
+            CanvasEditorIntent.RemoveNode("w1"),
+            CanvasEditorIntent.SetEditing("w1")
+        )
+        assertEquals(state.document, touched.document)
+        assertNull(touched.editingNodeId)
+        assertFalse(state.after(CanvasCommands.pan(30f, 0f)).viewport == state.viewport)
+    }
 }

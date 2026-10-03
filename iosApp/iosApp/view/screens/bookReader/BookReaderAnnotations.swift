@@ -9,6 +9,8 @@ final class BookReaderAnnotations: ObservableObject {
 
     @Published private(set) var inkCaptures = false
 
+    @Published private(set) var writable = true
+
     var onContents: (([NoteContentModel]) -> Void)?
 
     private let adapter: NotesBridgeAdapter
@@ -71,6 +73,7 @@ final class BookReaderAnnotations: ObservableObject {
         guard !noteId.isEmpty, contentsHandle == nil else { return }
         adapter.readNote(noteId: noteId) { [weak self] result in
             guard let self, case .success(let note) = result, let note else { return }
+            self.writable = note.share?.canWrite() != false
             self.note = note
             self.refresh(note.contents)
         }
@@ -88,7 +91,7 @@ final class BookReaderAnnotations: ObservableObject {
     }
 
     func write(_ content: NoteContentModel) {
-        guard let note else { return }
+        guard let note, writable else { return }
         let next = note.withContents(newContents: note.contents.filter { $0.id != content.id } + [content])
         self.note = next
         refresh(next.contents)
@@ -96,7 +99,7 @@ final class BookReaderAnnotations: ObservableObject {
     }
 
     func remove(contentId: String) {
-        guard let note else { return }
+        guard let note, writable else { return }
         let next = note.withContents(newContents: note.contents.filter { $0.id != contentId })
         self.note = next
         refresh(next.contents)
@@ -117,7 +120,7 @@ final class BookReaderAnnotations: ObservableObject {
     }
 
     private func saveAnnotation(_ content: NoteContentModel.Drawing) {
-        guard let note else { return }
+        guard let note, writable else { return }
         let others = note.contents.filter { $0.id != content.id }
         self.note = note.withContents(newContents: others + [content as NoteContentModel])
         pendingId = content.id

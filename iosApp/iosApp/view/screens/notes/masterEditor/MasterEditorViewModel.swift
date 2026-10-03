@@ -18,6 +18,7 @@ final class MasterEditorViewModel: ObservableObject {
     )
     @Published var keyboardDismissToken: Int = 0
     @Published private(set) var live: DrawLiveRoom?
+    @Published private(set) var access = NoteAccessGate.companion.open(userId: "")
 
     private(set) lazy var drawing = DrawingHost(
         contents: { [weak self] in self?.noteContents ?? [] },
@@ -32,6 +33,7 @@ final class MasterEditorViewModel: ObservableObject {
     private var remoteDepth = 0
     private let liveBridge = LiveDrawingBridge()
     private let syncBridge = SyncBridge()
+    private let shareBridge = ShareBridge()
     private var liveHandles: [Closeable] = []
     private var liveStream: AnyCancellable?
     private var liveOutbox: DrawLiveOutbox?
@@ -80,6 +82,7 @@ final class MasterEditorViewModel: ObservableObject {
         if let room = live { liveBridge.leave(roomId: room.roomId) }
         liveBridge.dispose()
         syncBridge.dispose()
+        shareBridge.dispose()
         contentSyncHandle?.close()
         remoteCanvasHandle?.close()
         contentBridge.dispose()
@@ -204,7 +207,10 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     private func apply(note: Note) {
+        access = shareBridge.accessOf(noteId: note.id)
+        if access.readOnly { canvas = commands.viewOnly(state: canvas) }
         self.note = note
+        if access.shared && live == nil { startLive() }
         if dirtyContentIds.isEmpty {
             noteContents = note.contents
         }
@@ -295,7 +301,7 @@ final class MasterEditorViewModel: ObservableObject {
             || CanvasPaginator.shared.needsUpgrade(nodes: stored)
             || CanvasPaginator.shared.pagesMissing(nodes: stored)
         let nodes = laidOut(noteId: noteId, stored: stored)
-        if rewritten {
+        if rewritten && !access.readOnly {
             canvasBridge.saveAll(noteId: noteId, nodes: nodes)
         }
         // 🔄 24-Sep-2026 — no saveNote() here any more: the seeded text block already writes a brand-new note, and re-saving an existing one on open would stamp it
@@ -448,6 +454,7 @@ final class MasterEditorViewModel: ObservableObject {
             load(noteId: read.noteId)
 
         } else if let save = commands.saveNoteEffect(effect: effect) {
+            guard !access.readOnly else { return }
             let dirty = save.dirtyContentIds
             adapter.createOrUpdateNote(note: save.note, dirtyContentIds: dirty) { [weak self] result in
                 switch result {
@@ -462,6 +469,7 @@ final class MasterEditorViewModel: ObservableObject {
             }
 
         } else if let row = commands.deleteContentRowEffect(effect: effect) {
+            guard !access.readOnly else { return }
             adapter.deleteNoteContent(contentId: row.contentId) { _ in }
 
         } else if let files = commands.deleteFilesEffect(effect: effect) {
@@ -504,7 +512,7 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     func saveNote() {
-        guard let note else { return }
+        guard let note, !access.readOnly else { return }
         let toSave = note.withContents(newContents: noteContents)
         let dirtySnapshot = dirtyContentIds
         adapter.createOrUpdateNote(note: toSave, dirtyContentIds: dirtySnapshot) { [weak self] result in
@@ -529,7 +537,8 @@ final class MasterEditorViewModel: ObservableObject {
     // 🔄 24-Sep-2026 — housekeeping (a fit, a measure, a placed orphan, another device's canvas) is written but never stamps the note
     private func dispatchCanvas(_ intent: CanvasEditorIntent, housekeeping: Bool) {
         let before = canvas
-        canvas = CanvasEditorReducer.shared.reduce(state: before, intent: intent)
+        let reducedState = CanvasEditorReducer.shared.reduce(state: before, intent: intent)
+        canvas = access.readOnly ? commands.viewOnly(state: reducedState) : reducedState
         // 📄 leaving edit mode — a tap on paper or bare canvas — puts the keyboard away
         if before.editingNodeId != nil && canvas.editingNodeId == nil {
             keyboardDismissToken &+= 1
@@ -567,6 +576,10 @@ final class MasterEditorViewModel: ObservableObject {
     /// CanvasCommands decides what "changed" means, so Android writes exactly the same rows.
     private func persistCanvas(before: CanvasEditorState, intent: CanvasEditorIntent, edited: Bool) {
         guard let noteId = note?.id else { return }
+        if canvas.viewport != before.viewport && commands.affectsViewport(intent: intent) {
+            canvasBridge.saveViewport(noteId: noteId, viewport: canvas.viewport)
+        }
+        guard !access.readOnly else { return }
         let changed: [CanvasNode] = commands.nodesToSave(before: before, next: canvas)
         let removed: [String] = commands.removedNodeIds(before: before, next: canvas)
         if pendingRemote != nil {
@@ -589,9 +602,6 @@ final class MasterEditorViewModel: ObservableObject {
         // 🔄 only a user's edit re-orders the note; housekeeping and another device's canvas never re-stamp it
         if edited && commands.orderChanged(before: before, next: canvas) {
             reorderNoteByCanvas()
-        }
-        if canvas.viewport != before.viewport && commands.affectsViewport(intent: intent) {
-            canvasBridge.saveViewport(noteId: noteId, viewport: canvas.viewport)
         }
     }
 
@@ -876,6 +886,7 @@ final class MasterEditorViewModel: ObservableObject {
     func deleteNode(nodeId: String) {
         edit(NoteEditKind.deleteContent) {
             let contentId = canvas.document.nodeById(nodeId: nodeId)?.contentId
+            guard canDelete(nodeId: nodeId, contentId: contentId) else { return }
             if let contentId { removeContent(id: contentId) }
             onCanvasIntent(commands.removeNode(nodeId: nodeId))
             texts[nodeId] = nil
@@ -953,17 +964,27 @@ final class MasterEditorViewModel: ObservableObject {
     }
 
     func askDeleteContent(_ contentId: String) {
+        guard canDelete(nodeId: nil, contentId: contentId) else { return }
         onEditorIntent(EditorCommands.shared.askDeleteContent(contentId: contentId))
     }
 
     func deleteContent(_ contentId: String) {
         edit(NoteEditKind.deleteContent) {
             guard let nodeId = canvas.document.nodeForContent(contentId: contentId)?.id else {
-                removeContent(id: contentId)
+                if canDelete(nodeId: nil, contentId: contentId) { removeContent(id: contentId) }
                 return
             }
             deleteNode(nodeId: nodeId)
         }
+    }
+
+    private func canDelete(nodeId: String?, contentId: String?) -> Bool {
+        let dependents = contentId.map { id in
+            DrawNoteContents.shared.dependentsOf(contents: noteContents, removedId: id).map { $0.id }
+        } ?? []
+        let allowed = access.canDeleteAll(itemIds: [nodeId, contentId].compactMap { $0 } + dependents)
+        if !allowed { errorMessage = access.deleteDenial }
+        return allowed
     }
 
     func renameNode(nodeId: String, name: String) {

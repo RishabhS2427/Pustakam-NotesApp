@@ -1,0 +1,1 @@
+UPDATE NoteContent SET id = CASE WHEN noteId GLOB '[0-9]*-*' THEN noteId || '-0f' ELSE '1000000000000-' || lower(hex(randomblob(16))) END WHERE id = noteId || ':overlay';

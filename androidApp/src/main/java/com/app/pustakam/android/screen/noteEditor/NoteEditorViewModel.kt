@@ -40,6 +40,8 @@ import com.app.pustakam.feature.notes.domain.usecase.DeleteNoteContentUseCase
 import com.app.pustakam.feature.notes.domain.usecase.DeleteNoteUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ObserveNoteContentsUseCase
 import com.app.pustakam.feature.notes.domain.usecase.ReadNoteUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ReadNoteAccessUseCase
+import com.app.pustakam.core.model.models.share.NoteAccessGate
 import com.app.pustakam.core.model.models.BaseResponse
 import com.app.pustakam.core.model.models.response.notes.Note
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
@@ -78,6 +80,7 @@ class NoteEditorViewModel : BaseViewModel() {
     private val updateSelectedMediaContentUseCase by inject<UpdateSelectedMediaContentUseCase>()
     private val clearSelectedNoteContentUseCase by inject<ClearSelectedNoteContentUseCase>()
     private val readNoteUseCase by inject<ReadNoteUseCase>()
+    private val readNoteAccess by inject<ReadNoteAccessUseCase>()
     private val deleteNoteUseCase by inject<DeleteNoteUseCase>()
     private val deleteNoteContentUseCase by inject<DeleteNoteContentUseCase>()
     private val createUpdateNoteUseCase by inject<CreateORUpdateNoteUseCase>()
@@ -94,6 +97,9 @@ class NoteEditorViewModel : BaseViewModel() {
     private var autoSaveJob: Job? = null
     private val _history = MutableStateFlow(NoteHistory())
     val history: StateFlow<NoteHistory> = _history.asStateFlow()
+
+    private val _access = MutableStateFlow(NoteAccessGate.open(""))
+    val access: StateFlow<NoteAccessGate> = _access.asStateFlow()
     private var editDepth = 0
     private var editStart: Note? = null
     private val trashedFiles = mutableSetOf<String>()
@@ -233,6 +239,7 @@ class NoteEditorViewModel : BaseViewModel() {
 
             NOTES_CODES.READ -> {
                 val note = result.data.data as Note
+                _access.value = readNoteAccess(note.id)
                 if (!noteContentUiState.value.isAllSetupDone) _noteContentUiState.update {
                     it.titleTextState.value = note.title ?: ""
                     it.copy(
@@ -295,6 +302,7 @@ class NoteEditorViewModel : BaseViewModel() {
         } else true
 
     fun createOrUpdateNote() {
+        if (_access.value.readOnly) return
         if(!isNoteValid()) {
                 changeNoteStatus(NoteStatus.exit)
                 return
@@ -327,6 +335,7 @@ class NoteEditorViewModel : BaseViewModel() {
     private fun hasPendingChanges(): Boolean {
         val state = _noteContentUiState.value
         val note = state.note ?: return false
+        if (_access.value.readOnly) return false
         return structureChanged || dirtyContentIds.isNotEmpty() ||
             state.titleTextState.value != note.title.orEmpty()
     }
@@ -342,6 +351,10 @@ class NoteEditorViewModel : BaseViewModel() {
     }
 
     private fun flush(onSaved: () -> Unit) {
+        if (_access.value.readOnly) {
+            onSaved()
+            return
+        }
         updateNoteObject()
         val note = _noteContentUiState.value.note ?: run { onSaved(); return }
         val dirty = dirtyContentIds.toSet()
@@ -397,6 +410,7 @@ class NoteEditorViewModel : BaseViewModel() {
     }
 
     fun deleteNote(noteId: String) {
+        if (!_access.value.canDeleteNote) return denyDelete()
         makeAWish(NOTES_CODES.DELETE) {
             deleteNoteUseCase.invoke(noteId)
         }
@@ -554,11 +568,17 @@ class NoteEditorViewModel : BaseViewModel() {
         _capabilities.value = EditorCapabilityReducer.stopAudio(_capabilities.value)
     }
     fun askDeleteContent(contentId: String) {
+        if (!_access.value.canDelete(contentId)) return denyDelete()
         onEditorIntent(EditorIntent.AskDeleteContent(contentId))
     }
 
     fun askDeleteNote() {
+        if (!_access.value.canDeleteNote) return denyDelete()
         onEditorIntent(EditorIntent.AskDeleteNote)
+    }
+
+    private fun denyDelete() {
+        _noteUiState.update { it.copy(error = _access.value.deleteDenial) }
     }
       fun addNewText() = edit(NoteEditKind.ADD_TEXT) {
           val note = _noteContentUiState.value.note!!
@@ -641,6 +661,7 @@ class NoteEditorViewModel : BaseViewModel() {
             val live = state.contents.toList()
             val find = live.find { value == it.id } ?: state.note?.contents?.find { value == it.id }
             val doomed = listOfNotNull(find) + DrawNoteContents.dependentsOf(live, value)
+            if (!_access.value.canDeleteAll(doomed.map { it.id })) return@edit denyDelete()
             doomed.forEach(::discard)
             val ids = doomed.map { it.id }.toSet() + value
             _noteContentUiState.update {
@@ -676,7 +697,7 @@ class NoteEditorViewModel : BaseViewModel() {
     }
 
     fun getMediaData(list: List<Pair<String, ContentType>>) = edit(NoteEditKind.ADD_MEDIA) {
-        if (list.isEmpty()) return@edit
+        if (list.isEmpty() || _access.value.readOnly) return@edit
         val currentState = _noteContentUiState.value
         val note = currentState.note ?: run {
             pendingMediaPaths = pendingMediaPaths + list   // 🔧 stash instead of dropping
@@ -764,7 +785,7 @@ class NoteEditorViewModel : BaseViewModel() {
 
     // 🔧 18-Jul-2026: same safe mutation pattern as getMediaData — list touched ONCE outside update{}
     private fun addImportedContents(items: List<NoteContentModel.MediaContent>) = edit(NoteEditKind.ADD_MEDIA) {
-        if (items.isEmpty()) return@edit
+        if (items.isEmpty() || _access.value.readOnly) return@edit
         val currentState = _noteContentUiState.value
         val note = currentState.note ?: return@edit
         currentState.contents.addAll(items)

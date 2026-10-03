@@ -183,7 +183,7 @@ fun ImagePreviewAndEditor(
             horizontalArrangement =Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = {
+            if (!state.readOnly) IconButton(onClick = {
                saveImage()
                 onDismiss(null)
             }, modifier = Modifier) {
@@ -192,7 +192,7 @@ fun ImagePreviewAndEditor(
             }
             //todo add image cropping feature
 
-            IconButton(onClick = {
+            if (!state.readOnly) IconButton(onClick = {
                 onEditImageAction(if(state.dataStateEvent == DataStateEvent.Editing) MediaProcessingEvent.CropImage else MediaProcessingEvent.EditImage)
             }, modifier = Modifier) {
                 Icon(imageVector =  if(state.dataStateEvent == DataStateEvent.Editing) Icons.Default.Crop else Icons.Filled.Edit,
@@ -210,7 +210,7 @@ fun ImagePreviewAndEditor(
                     contentDescription = "Rotate screen"
                 )
             }
-            if (annotation != null && target != null && base != null) {
+            if (!state.readOnly && annotation != null && target != null && base != null) {
                 IconButton(onClick = annotation::toggle) {
                     Icon(imageVector = Icons.Default.Brush, contentDescription = "Draw on image")
                 }

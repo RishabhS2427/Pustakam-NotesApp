@@ -754,6 +754,13 @@ object CanvasCommands {
 
     fun isHandTool(state: CanvasEditorState): Boolean = state.tool == CanvasTool.HAND
 
+    fun viewOnly(state: CanvasEditorState): CanvasEditorState = state.copy(
+        tool = CanvasTool.HAND,
+        draggingNodeId = null,
+        editingNodeId = null,
+        resizingNodeId = null
+    )
+
     fun permitsOf(state: CanvasEditorState): CanvasPermits = state.permits
 
     fun isEditing(state: CanvasEditorState): Boolean =

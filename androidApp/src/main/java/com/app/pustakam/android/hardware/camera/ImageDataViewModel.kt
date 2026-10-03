@@ -58,6 +58,7 @@ data class MediaFileStateHandler(
     val mediaFilePath :String = "",
     val orientation : ScreenOrientation = ScreenOrientation.UNSPECIFIED,
     val mediaId: String? = null,
+    val readOnly: Boolean = false,
 )
 
 class ImageDataViewModel : ViewModel(), KoinComponent {
@@ -116,7 +117,8 @@ class ImageDataViewModel : ViewModel(), KoinComponent {
         }
         clearRecording()
     }
-    fun onSetMediaToPreview(fileUrl: String, contentType: ContentType, mediaId: String? = null, noteId: String? = null) {
+    fun onSetMediaToPreview(fileUrl: String, contentType: ContentType, mediaId: String? = null, noteId: String? = null, readOnly: Boolean = false) {
+        _mediaFileState.update { it.copy(readOnly = readOnly) }
         if (noteId != null) _mediaFileState.update { it.copy(noteId = noteId) }
         if (fileUrl.isUrl()) {
             //todo handle later api call

@@ -1,6 +1,7 @@
 package com.app.pustakam.core.drawing.note
 
 import com.app.pustakam.core.common.util.ContentType
+import com.app.pustakam.core.common.util.UniqueIdGenerator
 import com.app.pustakam.core.drawing.anchor.DrawAnchoring
 import com.app.pustakam.core.drawing.codec.DrawCodec
 import com.app.pustakam.core.drawing.editor.DrawCommands
@@ -31,7 +32,9 @@ object DrawNoteContents {
 
     private const val EDITED_MIME_TYPE = "image/png"
 
-    private const val OVERLAY_SUFFIX = "overlay"
+    private const val OVERLAY_SUFFIX = "-0f"
+
+    private val CLIENT_ID = Regex("^\\d{10,17}-[0-9a-fA-F-]{8,61}$")
 
     fun surfaceOf(content: NoteContentModel.Drawing): DrawSurface = DrawCommands.surfaceOf(content.surface)
 
@@ -63,7 +66,8 @@ object DrawNoteContents {
     fun create(noteId: String, position: Double, surface: DrawSurface, width: Float, height: Float): NoteContentModel.Drawing =
         created(noteId, position, surface, width, height, NO_TARGET)
 
-    fun overlayId(noteId: String): String = "$noteId$PAGE_SEPARATOR$OVERLAY_SUFFIX"
+    fun overlayId(noteId: String): String =
+        if (CLIENT_ID.matches(noteId)) "$noteId$OVERLAY_SUFFIX" else UniqueIdGenerator.generateUniqueId()
 
     fun createOverlay(noteId: String, position: Double): NoteContentModel.Drawing =
         create(noteId, position, DrawSurface.OVERLAY, 0f, 0f).copy(id = overlayId(noteId))

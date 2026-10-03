@@ -51,6 +51,7 @@ fun ChatMessageBubble(
     onLongPress: (ChatMessage) -> Unit = {},
     onOpenMedia: (NoteContentModel.MediaContent) -> Unit = {},
     onOpenDocument: (NoteContentModel.MediaContent) -> Unit = {},
+    onOpenNote: (String) -> Unit = {},
 ) {
     val isAssistant = message.isFromAssistant()
     val bubbleColor = when {
@@ -88,6 +89,7 @@ fun ChatMessageBubble(
                 message = message,
                 onOpenMedia = onOpenMedia,
                 onOpenDocument = onOpenDocument,
+                onOpenNote = onOpenNote,
             )
 
             if (message.text.isNotBlank()) {

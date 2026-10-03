@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.ZoomIn
@@ -67,6 +68,7 @@ import com.app.pustakam.android.widgets.masterEditor.MasterCanvas
 import com.app.pustakam.android.widgets.drawing.DrawingCanvas
 import com.app.pustakam.android.widgets.drawing.DrawingChrome
 import com.app.pustakam.android.widgets.drawing.DrawingEntries
+import com.app.pustakam.android.widgets.share.ShareNoteSheet
 import com.app.pustakam.core.drawing.editor.DrawCommands
 import com.app.pustakam.core.drawing.live.DrawLive
 import com.app.pustakam.android.widgets.drawing.drawingInput
@@ -100,6 +102,7 @@ fun MasterEditorScreen(
     val uiState by viewModel.state.collectAsStateWithLifecycle()
     val canvas = uiState.canvas
     var showAttach by remember { mutableStateOf(false) }
+    var shareNoteId by remember { mutableStateOf<String?>(null) }
     var sheet by remember { mutableStateOf(SmartTextSheet.NONE) }
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -203,6 +206,7 @@ fun MasterEditorScreen(
                     scale = canvas.viewport.scale,
                     textState = uiState.textFor(node.id),
                     content = nodeContent,
+                    readOnly = uiState.access.readOnly,
                     onTextIntent = { viewModel.onTextIntent(node.id, it) },
                     onFocused = { viewModel.onCanvasIntent(CanvasCommands.setEditing(node.id)) },
                     onOpenMedia = {
@@ -221,7 +225,8 @@ fun MasterEditorScreen(
                                     media.getMediaUrl(),
                                     media.type,
                                     mediaId = media.id,
-                                    noteId = media.noteId
+                                    noteId = media.noteId,
+                                    readOnly = uiState.access.readOnly
                                 )
                                 when {
                                     media.type.isImage() -> navigateTo(Route.ImagePreview)
@@ -260,14 +265,22 @@ fun MasterEditorScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            IconButton(onClick = viewModel::undo, enabled = uiState.history.canUndo) {
+            val readOnly = uiState.access.readOnly
+            uiState.access.label?.let {
+                Text(
+                    text = it,
+                    style = TextStyle(color = colors.onSurfaceMuted, fontSize = 13.sp),
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+            }
+            if (!readOnly) IconButton(onClick = viewModel::undo, enabled = uiState.history.canUndo) {
                 Icon(
                     Icons.AutoMirrored.Filled.Undo,
                     contentDescription = "Undo",
                     tint = if (uiState.history.canUndo) colors.onSurface else colors.onSurfaceMuted
                 )
             }
-            IconButton(onClick = viewModel::redo, enabled = uiState.history.canRedo) {
+            if (!readOnly) IconButton(onClick = viewModel::redo, enabled = uiState.history.canRedo) {
                 Icon(
                     Icons.AutoMirrored.Filled.Redo,
                     contentDescription = "Redo",
@@ -284,7 +297,7 @@ fun MasterEditorScreen(
             IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.zoomIn()) }) {
                 Icon(Icons.Default.ZoomIn, contentDescription = "Zoom in", tint = colors.onSurface)
             }
-            IconButton(
+            if (!readOnly) IconButton(
                 onClick = { showAttach = true },
 
             ) {
@@ -297,7 +310,7 @@ fun MasterEditorScreen(
                     tint = colors.onSurface
                 )
             }
-            CanvasCommands.tools().forEach { tool ->
+            if (!readOnly) CanvasCommands.tools().forEach { tool ->
                 val active = canvas.tool == tool
                 IconButton(onClick = { viewModel.onCanvasIntent(CanvasCommands.setTool(tool)) }) {
                     Icon(
@@ -312,7 +325,7 @@ fun MasterEditorScreen(
                     )
                 }
             }
-            IconButton(onClick = viewModel::toggleDrawingOverlay) {
+            if (!readOnly) IconButton(onClick = viewModel::toggleDrawingOverlay) {
                 Icon(
                     Icons.Default.Edit,
                     contentDescription = "Draw on board",
@@ -336,7 +349,11 @@ fun MasterEditorScreen(
                     style = TextStyle(color = colors.accent, fontSize = 13.sp)
                 )
             }
+            if (uiState.access.canShare) IconButton(onClick = { shareNoteId = uiState.note?.id }) {
+                Icon(Icons.Default.PersonAdd, contentDescription = "Share a copy", tint = colors.onSurface)
+            }
         }
+        shareNoteId?.let { noteId -> ShareNoteSheet(noteId = noteId, onDismiss = { shareNoteId = null }) }
         val drawingSession = viewModel.drawing.active()
         if (drawingTarget != null && drawingSession != null) {
             DrawingChrome(

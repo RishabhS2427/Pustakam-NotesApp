@@ -9,12 +9,18 @@ struct ChatAttachmentsView: View {
     let message: ChatMessage
     var onOpenMedia: (NoteContentModel.MediaContent) -> Void = { _ in }
     var onOpenDocument: (NoteContentModel.MediaContent) -> Void = { _ in }
+    var onOpenNote: (String) -> Void = { _ in }
 
     private var medias: [NoteContentModel.MediaContent] { message.mediaContents() }
 
+    private var notes: [ChatAttachment] { message.sharedNotes() }
+
     var body: some View {
-        if !medias.isEmpty {
+        if !medias.isEmpty || !notes.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(notes.enumerated()), id: \.offset) { _, card in
+                    SharedNoteCard(card: card, onOpen: onOpenNote)
+                }
                 ForEach(medias, id: \.id) { media in
                     switch media.type {
                     case .image, .gif:
@@ -35,5 +41,37 @@ struct ChatAttachmentsView: View {
                 }
             }
         }
+    }
+}
+
+private struct SharedNoteCard: View {
+
+    let card: ChatAttachment
+    let onOpen: (String) -> Void
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Button {
+            if let noteId = card.sharedNoteId() { onOpen(noteId) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "doc.text").foregroundColor(palette.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(card.title.isEmpty ? ChatShareSheet.shared.UNTITLED : card.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(Theme.Colors.text)
+                        .lineLimit(1)
+                    Text(ChatShareSheet.shared.OPEN_NOTE)
+                        .font(.caption)
+                        .foregroundColor(palette.accent)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.Colors.background))
+        }
+        .buttonStyle(.plain)
     }
 }

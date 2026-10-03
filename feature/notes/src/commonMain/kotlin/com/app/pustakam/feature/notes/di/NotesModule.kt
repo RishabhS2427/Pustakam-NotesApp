@@ -55,6 +55,16 @@ import com.app.pustakam.feature.notes.domain.usecase.StartSyncUseCase
 import com.app.pustakam.feature.notes.domain.usecase.SyncNowUseCase
 import com.app.pustakam.core.media.download.MediaLandingHandler
 import com.app.pustakam.core.media.upload.MediaUploadRetry
+import com.app.pustakam.feature.notes.data.repositoryImpl.ShareRepository
+import com.app.pustakam.feature.notes.domain.repository.IShareRepository
+import com.app.pustakam.feature.notes.domain.usecase.ChangeShareMembersUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ListNoteSharesUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ReadNoteAccessUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ReadNoteShareUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ShareNoteUseCase
+import com.app.pustakam.feature.notes.domain.usecase.SharedNoteIdsUseCase
+import com.app.pustakam.feature.notes.domain.usecase.OpenSharedNoteUseCase
+import com.app.pustakam.feature.notes.domain.usecase.StopSharingUseCase
 import org.koin.core.module.Module
 import org.koin.dsl.binds
 import org.koin.dsl.module
@@ -67,6 +77,7 @@ fun notesModule(): Module = module {
 
     single<INoteContentRepository> { NoteContentRepository() }
     single<ICanvasRepository> { CanvasRepository() }
+    single<IShareRepository> { ShareRepository() }
     single<INoteSyncRepository> { NoteSyncRepository() }
     // 🔄 20-Aug-2026 sync: single — it owns the run lock and the backoff counter, so a second
     //   instance would let two cycles push the same notes at once.
@@ -119,4 +130,12 @@ fun notesModule(): Module = module {
     factory<NotifyConnectivityUseCase> { NotifyConnectivityUseCase() }
     factory<SetSyncForegroundUseCase> { SetSyncForegroundUseCase() }
     factory<ObserveSyncStateUseCase> { ObserveSyncStateUseCase() }
+    factory<ShareNoteUseCase> { ShareNoteUseCase() }
+    factory<ListNoteSharesUseCase> { ListNoteSharesUseCase() }
+    factory<ChangeShareMembersUseCase> { ChangeShareMembersUseCase() }
+    factory<StopSharingUseCase> { StopSharingUseCase() }
+    factory<ReadNoteShareUseCase> { ReadNoteShareUseCase() }
+    factory<SharedNoteIdsUseCase> { SharedNoteIdsUseCase() }
+    factory<ReadNoteAccessUseCase> { ReadNoteAccessUseCase() }
+    factory<OpenSharedNoteUseCase> { OpenSharedNoteUseCase() }
 }

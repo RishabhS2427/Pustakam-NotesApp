@@ -18,6 +18,7 @@ class NoteEditorViewModel: ObservableObject {
 
     @Published var state = NoteEditorUIState()
     @Published var capabilities = EditorCapabilityCommands.shared.empty()
+    @Published private(set) var access = NoteAccessGate.companion.open(userId: "")
 
     private(set) lazy var drawing = DrawingHost(
         contents: { [weak self] in self?.state.noteContents ?? [] },
@@ -33,6 +34,7 @@ class NoteEditorViewModel: ObservableObject {
 
     private let adapter: NotesBridgeAdapter
     private let contentBridge: NoteContentBridge
+    private let shareBridge = ShareBridge()
     private var contentUpdatesHandle: Closeable?
     private var contentSyncHandle: Closeable?
     private var dirtyContentIds = Set<String>()
@@ -125,6 +127,7 @@ class NoteEditorViewModel: ObservableObject {
         contentUpdatesHandle?.close()
         contentSyncHandle?.close()
         contentBridge.dispose()
+        shareBridge.dispose()
         deleteFilesLater(NoteFiles.shared.discardable(trashed: trashedFiles, live: state.noteContents))
     }
 
@@ -207,6 +210,7 @@ class NoteEditorViewModel: ObservableObject {
 
     private func apply(note: Note) {
         let isFirstLoad = state.note == nil
+        access = shareBridge.accessOf(noteId: note.id)
         state.note = note
         if isFirstLoad {
             state.title = note.title ?? ""
@@ -326,7 +330,7 @@ class NoteEditorViewModel: ObservableObject {
     }
 
     func getCapturedData(media: CapturedMedia?) {
-        guard let noteId = state.note?.id else { return }
+        guard let noteId = state.note?.id, !access.readOnly else { return }
         guard let content = EditorCapture.persist(
             media: media,
             noteId: noteId,
@@ -351,11 +355,17 @@ class NoteEditorViewModel: ObservableObject {
     }
 
     func askDeleteContent(_ contentId: String) {
+        guard access.canDelete(itemId: contentId) else { return denyDelete() }
         onEditorIntent(EditorCommands.shared.askDeleteContent(contentId: contentId))
     }
 
     func askDeleteNote() {
+        guard access.canDeleteNote else { return denyDelete() }
         onEditorIntent(EditorCommands.shared.askDeleteNote())
+    }
+
+    private func denyDelete() {
+        state.errorMessage = access.deleteDenial
     }
 
     // MARK: - File import (18-Jul-2026)
@@ -373,6 +383,7 @@ class NoteEditorViewModel: ObservableObject {
 
     // 🔧 18-Jul-2026: NEW FEATURE (file import) — device multi-pick: copy on background, append on main
     func importFiles(urls: [URL]) {
+        guard !access.readOnly else { return }
         guard let noteId = state.note?.id else {
             state.errorMessage = "Note is still loading. Try again."
             return
@@ -398,6 +409,7 @@ class NoteEditorViewModel: ObservableObject {
 
     // 🔧 18-Jul-2026: NEW FEATURE (file import) — link import: download if it IS a file, else "No file found"
     func importFromLink(_ url: String) {
+        guard !access.readOnly else { return }
         guard let noteId = state.note?.id else {
             state.errorMessage = "Note is still loading. Try again."
             return
@@ -436,7 +448,7 @@ class NoteEditorViewModel: ObservableObject {
     }
 
     private func persist(onSaved: @escaping () -> Void) {
-        guard let note = state.note else {
+        guard let note = state.note, !access.readOnly else {
             onSaved(); return
         }
         let toSave = note.withTitleAndContents(newTitle: state.title, newContents: state.noteContents)
@@ -479,7 +491,7 @@ class NoteEditorViewModel: ObservableObject {
 
     // ✍️ what the disk has not seen yet: an edited row, a deleted one, or a retitled note
     private var hasPendingChanges: Bool {
-        guard let note = state.note else { return false }
+        guard let note = state.note, !access.readOnly else { return false }
         return structureChanged || !dirtyContentIds.isEmpty || state.title != (note.title ?? "")
     }
 
@@ -490,7 +502,7 @@ class NoteEditorViewModel: ObservableObject {
     }
 
     func saveNote() {
-         guard !state.isDeleted, let note = state.note, isNoteValid() else { return }
+         guard !state.isDeleted, !access.readOnly, let note = state.note, isNoteValid() else { return }
         
         if let split = TextBlockSplitter.shared.splitOversized(contents: state.noteContents) {
             state.noteContents = split.contents as? [NoteContentModel] ?? state.noteContents
@@ -522,6 +534,7 @@ class NoteEditorViewModel: ObservableObject {
 
     /// Replaces deleteNoteCall(); View no longer runs Task/casts. (fixes V5)
     func deleteNote(onDeleted: @escaping () -> Void) {
+        guard access.canDeleteNote else { return denyDelete() }
         guard let noteId = state.note?.id else { return }
         adapter.deleteNote(noteId: noteId) { [weak self] result in
             guard let self else { return }
@@ -548,6 +561,7 @@ class NoteEditorViewModel: ObservableObject {
         edit(NoteEditKind.deleteContent) {
             guard let content = state.noteContents.first(where: { $0.id == contentId }) else { return }
             let doomed = [content] + DrawNoteContents.shared.dependentsOf(contents: state.noteContents, removedId: contentId)
+            guard access.canDeleteAll(itemIds: doomed.map { $0.id }) else { return denyDelete() }
             doomed.forEach(discard)
             let ids = Set(doomed.map { $0.id })
             state.noteContents.removeAll { ids.contains($0.id) }

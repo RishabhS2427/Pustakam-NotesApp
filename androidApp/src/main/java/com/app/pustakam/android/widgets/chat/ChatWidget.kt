@@ -67,6 +67,7 @@ fun ChatWidget(
     onAttach: () -> Unit = {},
     onOpenMedia: (NoteContentModel.MediaContent) -> Unit = {},
     onOpenDocument: (NoteContentModel.MediaContent) -> Unit = {},
+    onOpenNote: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -151,6 +152,7 @@ fun ChatWidget(
                             onLongPress = { if (state.isMine(it)) viewModel.deleteMessage(it) },
                             onOpenMedia = onOpenMedia,
                             onOpenDocument = onOpenDocument,
+                            onOpenNote = { noteId -> viewModel.openSharedNote(noteId, onOpenNote) },
                         )
                     }
                 }

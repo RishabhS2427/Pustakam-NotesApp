@@ -19,6 +19,7 @@ struct MasterEditorScreen: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dismiss) private var dismiss
     @State private var showAttach = false
+    @State private var shareTarget: ShareNoteTarget?
     @State private var sheet: MasterTextSheet = .none
     @State private var keyboardHeight: CGFloat = 0
     @State private var autoFocused = false
@@ -74,6 +75,7 @@ struct MasterEditorScreen: View {
                 onPermissionDenied: { viewModel.onPermissionDenied($0) }
             )
         )
+        .sheet(item: $shareTarget) { target in ShareNoteSheet(noteId: target.id) }
         .sheet(isPresented: Binding(
             get: { sheet.isPresented },
             set: { if !$0 { sheet = .none } }
@@ -144,7 +146,8 @@ struct MasterEditorScreen: View {
             onOpenMedia: { onOpenMedia(node.contentId) },
             onDelete: { viewModel.deleteNode(nodeId: nodeId) },
             keyboardInsetPx: keyboardHeight,
-            drawingSession: (viewModel.content(for: node) as? NoteContentModel.Drawing).map { viewModel.drawing.session($0) }
+            drawingSession: (viewModel.content(for: node) as? NoteContentModel.Drawing).map { viewModel.drawing.session($0) },
+            readOnly: viewModel.access.readOnly
         )
     }
 
@@ -244,6 +247,8 @@ struct MasterEditorScreen: View {
 
     private var zoomLabel: String { "\(viewModel.canvas.zoomPercent)%" }
 
+    private var readOnly: Bool { viewModel.access.readOnly }
+
     private var liveTint: Color {
         guard let live = viewModel.live else { return palette.onSurface }
         return DrawLive.shared.isLive(room: live) ? palette.accent : palette.onSurfaceMuted
@@ -251,6 +256,13 @@ struct MasterEditorScreen: View {
 
     private var zoomBar: some View {
         HStack(spacing: 4) {
+            if let label = viewModel.access.label {
+                Text(label)
+                    .font(.system(size: 13))
+                    .foregroundColor(palette.onSurfaceMuted)
+                    .padding(.horizontal, 8)
+            }
+            if !readOnly {
             barButton(icon: DrawingIcons.undo, tint: viewModel.history.canUndo ? palette.onSurface : palette.onSurfaceMuted) {
                 viewModel.undo()
             }
@@ -261,6 +273,7 @@ struct MasterEditorScreen: View {
             }
             .disabled(!viewModel.history.canRedo)
             .accessibilityLabel(Text("Redo"))
+            }
             barButton(icon: "minus", tint: palette.onSurface) {
                 viewModel.onCanvasIntent(commands.zoomOut())
             }
@@ -273,9 +286,11 @@ struct MasterEditorScreen: View {
             barButton(icon: "viewfinder", tint: palette.onSurface) {
                 viewModel.onCanvasIntent(commands.zoomToFit())
             }
+            if !readOnly {
             toolButtons
             barButton(icon: DrawingIcons.draw, tint: viewModel.drawing.isOverlayActive() ? palette.accent : palette.onSurface) {
                 viewModel.toggleDrawingOverlay()
+            }
             }
             barButton(icon: "dot.radiowaves.left.and.right", tint: liveTint) {
                 viewModel.toggleLive()
@@ -286,8 +301,16 @@ struct MasterEditorScreen: View {
                     .font(.system(size: 13))
                     .foregroundColor(palette.accent)
             }
+            if viewModel.access.canShare {
+            barButton(icon: "person.badge.plus", tint: palette.onSurface) {
+                shareTarget = viewModel.note.map { ShareNoteTarget(id: $0.id) }
+            }
+            .accessibilityLabel(Text("Share a copy"))
+            }
+            if !readOnly {
             barButton(icon: "plus.square.on.square", tint: palette.accent) {
                 showAttach = true
+            }
             }
         }
         .padding(.horizontal, 12)
@@ -369,6 +392,7 @@ struct MasterNodeContent: View {
     var onDelete: () -> Void = {}
     var keyboardInsetPx: CGFloat = 0
     var drawingSession: DrawingSession? = nil
+    var readOnly: Bool = false
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
@@ -431,7 +455,7 @@ struct MasterNodeContent: View {
             // keyboard and reopened it. Focus drives editingNodeId, never the reverse.
             MasterTextWidget(
                 state: textState,
-                readOnly: false,
+                readOnly: readOnly,
                 scale: scale,
                 accessory: nil,
                 dismissToken: dismissToken,

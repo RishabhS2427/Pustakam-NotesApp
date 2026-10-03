@@ -84,6 +84,8 @@ import com.app.pustakam.feature.chat.domain.usecase.JoinLiveRoomUseCase
 import com.app.pustakam.feature.chat.domain.usecase.LeaveLiveRoomUseCase
 import com.app.pustakam.feature.chat.domain.usecase.SendLiveRequestUseCase
 import com.app.pustakam.feature.notes.domain.usecase.RequestSyncUseCase
+import com.app.pustakam.feature.notes.domain.usecase.ReadNoteAccessUseCase
+import com.app.pustakam.core.model.models.share.NoteAccessGate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
@@ -104,6 +106,7 @@ data class MasterEditorUiState(
     val capabilities: EditorCapabilityState = EditorCapabilityState(),
     val history: NoteHistory = NoteHistory(),
     val live: DrawLiveRoom? = null,
+    val access: NoteAccessGate = NoteAccessGate.open(""),
     val error: String? = null
 ) {
     fun textFor(nodeId: String): MasterTextState? = texts[nodeId]
@@ -126,6 +129,7 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     private val leaveLiveRoom by inject<LeaveLiveRoomUseCase>()
     private val sendLiveRequest by inject<SendLiveRequestUseCase>()
     private val requestSync by inject<RequestSyncUseCase>()
+    private val readNoteAccess by inject<ReadNoteAccessUseCase>()
     private val removeCanvasNode by inject<RemoveCanvasNodeUseCase>()
     private val saveCanvasViewport by inject<SaveCanvasViewportUseCase>()
     private val readNoteUseCase by inject<ReadNoteUseCase>()
@@ -392,7 +396,8 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
             else -> CanvasPaginator.ensurePage(document, width, height)
         }
         val nodes = rebuilt.nodes
-        if (isNew || nodes != document.nodes) {
+        val readOnly = _state.value.access.readOnly
+        if (!readOnly && (isNew || nodes != document.nodes)) {
             makeAWish(CANVAS_CODES.SAVE_NODES, showLoader = false) {
                 saveCanvasNodes(note.id, nodes)
             }
@@ -407,7 +412,7 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         // a note from the "create empty note" path lives only in memory until now; write it so
         // the canvas has a real parent and a later read by id can find it
         // 🔄 24-Sep-2026 — only then: opening a note that already exists must never re-stamp it
-        if (seedContent != null) {
+        if (seedContent != null && !readOnly) {
             makeAWish(NOTES_CODES.UPDATE, showLoader = false) { saveNoteUseCase(seededNote) }
         }
         makeAWish(CANVAS_CODES.READ_VIEWPORT, showLoader = false) {
@@ -474,14 +479,14 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         when (effect) {
             is EditorEffect.ReadNote -> readFromDataBase(effect.noteId)
 
-            is EditorEffect.SaveNote -> {
+            is EditorEffect.SaveNote -> if (!_state.value.access.readOnly) {
                 lastSavedDirtyIds = effect.dirtyContentIds
                 makeAWish(NOTES_CODES.UPDATE, showLoader = false) {
                     saveNoteUseCase(effect.note, effect.dirtyContentIds)
                 }
             }
 
-            is EditorEffect.DeleteContentRow ->
+            is EditorEffect.DeleteContentRow -> if (!_state.value.access.readOnly)
                 makeAWish(NOTES_CODES.DELETE, showLoader = false) {
                     deleteNoteContentUseCase.invoke(effect.contentId)
                 }
@@ -507,7 +512,7 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     // 🔄 24-Sep-2026 — housekeeping (a fit, a measure, a placed orphan, another device's canvas) is written but never stamps the note
     private fun dispatchCanvas(intent: CanvasEditorIntent, housekeeping: Boolean) {
         val before = _state.value.canvas
-        val next = CanvasEditorReducer.reduce(before, intent)
+        val next = CanvasEditorReducer.reduce(before, intent).let { if (_state.value.access.readOnly) CanvasCommands.viewOnly(it) else it }
         _state.update { it.copy(canvas = next) }
         if (CanvasCommands.gestureStarted(before, next)) gestureStart = next.document
         val edited = !housekeeping && CanvasCommands.editsLayout(before, next, intent, gestureStart)
@@ -543,6 +548,10 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         edited: Boolean
     ) {
         val id = _state.value.note?.id ?: return
+        if (before.viewport != next.viewport && CanvasCommands.affectsViewport(intent)) {
+            saveViewport(id, next.viewport)
+        }
+        if (_state.value.access.readOnly) return
         val changed = CanvasCommands.nodesToSave(before, next)
         val removed = CanvasCommands.removedNodeIds(before, next)
         if (pendingRemote != null) touchedWhilePending += changed.map { it.id } + removed
@@ -560,9 +569,6 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         // 🔄 only a user's edit re-orders the note; housekeeping and another device's canvas never re-stamp it
         if (edited && CanvasCommands.orderChanged(before, next)) {
             reorderNoteByCanvas()
-        }
-        if (before.viewport != next.viewport && CanvasCommands.affectsViewport(intent)) {
-            saveViewport(id, next.viewport)
         }
     }
 
@@ -805,7 +811,17 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
 
     fun deleteContent(contentId: String) = edit(NoteEditKind.DELETE_CONTENT) {
         val nodeId = _state.value.canvas.document.nodeForContent(contentId)?.id
-        if (nodeId != null) deleteNode(nodeId) else removeContentOnly(contentId)
+        when {
+            nodeId != null -> deleteNode(nodeId)
+            canDelete(null, contentId) -> removeContentOnly(contentId)
+        }
+    }
+
+    private fun canDelete(nodeId: String?, contentId: String?): Boolean {
+        val dependents = contentId?.let { DrawNoteContents.dependentsOf(_state.value.note?.contents.orEmpty(), it) }.orEmpty()
+        val allowed = _state.value.access.canDeleteAll(listOfNotNull(nodeId, contentId) + dependents.map { it.id })
+        if (!allowed) _state.update { it.copy(error = it.access.deleteDenial) }
+        return allowed
     }
 
     private fun removeContentOnly(contentId: String) {
@@ -877,6 +893,7 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     fun deleteNode(nodeId: String) = edit(NoteEditKind.DELETE_CONTENT) {
         if (_state.value.note == null) return@edit
         val contentId = _state.value.canvas.document.nodeById(nodeId)?.contentId
+        if (!canDelete(nodeId, contentId)) return@edit
         if (contentId != null) removeContentOnly(contentId)
         onCanvasIntent(CanvasCommands.removeNode(nodeId))
         _state.update { it.copy(texts = it.texts - nodeId) }
@@ -971,7 +988,7 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
 
 
     fun askDeleteContent(contentId: String) {
-        onEditorIntent(EditorIntent.AskDeleteContent(contentId))
+        if (canDelete(null, contentId)) onEditorIntent(EditorIntent.AskDeleteContent(contentId))
     }
 
     fun setAttachSheet(visible: Boolean) {
@@ -990,7 +1007,16 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
         when (taskCode) {
             NOTES_CODES.READ -> {
                 val note = result.data.data as? Note ?: return
-                _state.update { it.copy(note = note, error = null) }
+                val access = readNoteAccess(note.id)
+                _state.update {
+                    it.copy(
+                        note = note,
+                        access = access,
+                        canvas = if (access.readOnly) CanvasCommands.viewOnly(it.canvas) else it.canvas,
+                        error = null
+                    )
+                }
+                if (access.shared && _state.value.live == null) startLive()
                 // 🎧 the canvas plays through the SAME shared player as the note editor — it needs this note's media list
                 setSelectedNoteContentUseCase(note)
                 readCanvasOf(note)

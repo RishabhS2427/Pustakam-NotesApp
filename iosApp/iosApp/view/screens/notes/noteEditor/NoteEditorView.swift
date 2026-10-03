@@ -15,6 +15,7 @@ struct NoteEditorView: View {
     @State private var previewMediaId: String? = nil
     // 🔧 20-Jul-2026: NEW FEATURE (export) — format chooser + spinner while generating
     @State private var showExportOptions = false
+    @State private var shareTarget: ShareNoteTarget?
     @State private var isExporting = false
     @State private var ink = NoteInkAnchors()
     // 🔧 V1 fix: @StateObject (was @ObservedObject + inline init → VM recreated on every
@@ -41,6 +42,7 @@ struct NoteEditorView: View {
                     fontSize: 30,   // 🔧 25-Sep-2026 — matches Android's title (typography.headlineLarge: 30sp Bold)
                     fontWeight: .bold
                 ).frame(minHeight: 20, maxHeight:.infinity)
+                .disabled(access.readOnly)
                     ForEach(noteEditorViewModel.state.noteContents){ noteContent in
                         contentRow(noteContent)
                             .noteInkRow(noteContent.id)
@@ -59,7 +61,7 @@ struct NoteEditorView: View {
                 LoadingUI().frame(alignment: .center)
                 Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
             }
-            if noteEditorViewModel.drawing.target == nil {
+            if noteEditorViewModel.drawing.target == nil && !access.readOnly {
                 OverlayEditorButtons(
                     showDelete: noteEditorViewModel.state.note != nil,  // 🔧 state.note — updates when async note arrives
                     onMediaCapture: { noteEditorViewModel.requestCapture(ContentType.image) },
@@ -133,6 +135,11 @@ struct NoteEditorView: View {
         .padding(.horizontal, 12)
         .navigationBarBackButtonHidden(true)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                if let label = access.label {
+                    Text(label).font(.caption).foregroundColor(Theme.Colors.secondary)
+                }
+            }
             ToolbarItem(placement: .topBarLeading) {
                 BackButton(action: {
                     if noteEditorViewModel.drawing.target != nil {
@@ -145,10 +152,12 @@ struct NoteEditorView: View {
             
             ToolbarItem(placement: .topBarTrailing) {
                 HStack{
+                    if !access.readOnly {
                     ActionButtonWithoutBackground(iconName: DrawingIcons.draw,
                                                   action: {
                         noteEditorViewModel.drawing.toggleOverlay()
                     }, tint: overlayActive ? Theme.Colors.primary : Theme.Colors.secondary)
+                    }
                     ActionButtonWithoutBackground(iconName: "workspace",
                                                   action: {
                         // flush first: the canvas reads the note from the db on open,
@@ -158,6 +167,7 @@ struct NoteEditorView: View {
                         }
                     }, tint: Theme.Colors.secondary)
                     
+                    if !access.readOnly {
                     ActionButtonWithoutBackground(iconName: "arrow.uturn.backward",
                                                   enabled : noteEditorViewModel.canUndo,
                                                   action: {
@@ -168,6 +178,7 @@ struct NoteEditorView: View {
                                                   action: {
                         noteEditorViewModel.redo()
                     }, tint: Theme.Colors.secondary)
+                    }
                     ActionButtonWithoutBackground(iconName: "book",
                                                   enabled : noteEditorViewModel.isNoteValid(),
                                                   action: {
@@ -180,15 +191,27 @@ struct NoteEditorView: View {
                     ActionButtonWithoutBackground(iconName: "square.and.arrow.up.on.square", action: {
                         showExportOptions = true
                     }, tint: Theme.Colors.secondary)
+                    if access.canShare {
+                    ActionButtonWithoutBackground(iconName: "person.badge.plus", action: {
+                        noteEditorViewModel.openWorkspace { noteId in
+                            shareTarget = ShareNoteTarget(id: noteId)
+                        }
+                    }, tint: Theme.Colors.secondary)
+                    }
+                    if !access.readOnly {
                     ActionButtonWithoutBackground(iconName: "tray.and.arrow.down", action: {
                         saveNote()
                     }, tint :Theme.Colors.secondary)
+                    }
+                    if access.canDeleteNote {
                         ActionButtonWithoutBackground(iconName: "trash", action: {
                             setAlert(message: "Are you sure you want to delete this note?", title: "Delete note", alertType: .DELETE )
                         }, tint: Color.red)
+                    }
                 }
             }
         }
+        .sheet(item: $shareTarget) { target in ShareNoteSheet(noteId: target.id) }
         .onDisappear { noteEditorViewModel.saveIfChanged() }
         .onAppear { noteEditorViewModel.refresh() }
         // 🔄 28-Aug-2026 — pull down inside the editor to fetch this note's latest content
@@ -239,6 +262,7 @@ struct NoteEditorView: View {
                 MasterTextContentWidget(
                     text: textContent.text,
                     metadata: textContent.metadata,
+                    readOnly: access.readOnly,
                     onDocumentChange: { document in
                         onUpdate(
                             RichTextCodec.shared.applyTo(content: textContent, document: document)
@@ -304,7 +328,7 @@ struct NoteEditorView: View {
                         content: drawing,
                         session: noteEditorViewModel.drawing.session(drawing),
                         active: noteEditorViewModel.drawing.target == drawing.id,
-                        onActivate: { noteEditorViewModel.drawing.start(drawing.id) },
+                        onActivate: { if !access.readOnly { noteEditorViewModel.drawing.start(drawing.id) } },
                         onDelete: { askDeleteContent(contentId: drawing.id, kind: "Drawing") }
                     )
                 }
@@ -316,6 +340,8 @@ struct NoteEditorView: View {
     
     
     private var overlayActive: Bool { noteEditorViewModel.drawing.isOverlayActive() }
+
+    private var access: NoteAccessGate { noteEditorViewModel.access }
 
     @ViewBuilder
     private var overlayInk: some View {
@@ -425,6 +451,10 @@ struct NoteEditorView: View {
     }
 
     private func askDeleteContent(contentId: String, kind: String) {
+        guard access.canDelete(itemId: contentId) else {
+            setAlert(message: access.deleteDenial, title: "Delete \(kind)", alertType: .WARNING)
+            return
+        }
         deleteContentId = contentId
         setAlert(message: "Are you sure you want to delete this \(kind)?",
                  title: "Delete \(kind)", alertType: .DELETE_CONTENT)

@@ -11,6 +11,7 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var state: ChatState
 
     private let adapter: ChatBridgeAdapter
+    private let shareBridge = ShareBridge()
     private var typingTimer: Timer?
     private var openedConversationId: String?
 
@@ -48,7 +49,10 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    deinit { typingTimer?.invalidate() }
+    deinit {
+        typingTimer?.invalidate()
+        shareBridge.dispose()
+    }
 
     // MARK: - Lifecycle
 
@@ -142,6 +146,18 @@ final class ChatViewModel: ObservableObject {
         guard let conversationId = state.conversationId else { return }
         adapter.deleteMessage(conversationId: conversationId, messageId: message.id) { [weak self] result in
             if case .failure(let error) = result { self?.emit(ChatIntentFailed(message: error.message)) }
+        }
+    }
+
+    func openSharedNote(_ noteId: String, onReady: @escaping (String) -> Void) {
+        shareBridge.ensureLocal(noteId: noteId) { [weak self] ready in
+            DispatchQueue.main.async {
+                if ready.boolValue {
+                    onReady(noteId)
+                } else {
+                    self?.emit(ChatIntentFailed(message: ChatShareSheet.shared.NOTE_UNAVAILABLE))
+                }
+            }
         }
     }
 

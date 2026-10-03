@@ -24,6 +24,10 @@ import com.app.pustakam.core.model.models.profile.PublicUser
 import com.app.pustakam.core.model.models.profile.SetUsernameReq
 import com.app.pustakam.core.model.models.profile.UpdateProfileReq
 import com.app.pustakam.core.model.models.profile.UsernameAvailability
+import com.app.pustakam.core.model.models.share.CreateShareRequest
+import com.app.pustakam.core.model.models.share.NoteShare
+import com.app.pustakam.core.model.models.share.StopSharingResult
+import com.app.pustakam.core.model.models.share.UpdateShareMembersRequest
 import com.app.pustakam.core.common.util.NetworkError
 import io.ktor.client.plugins.onUpload
 import io.ktor.client.request.delete
@@ -220,6 +224,18 @@ class ApiCallClient : BaseClient() {
         val search = query?.takeIf { it.isNotBlank() }?.let { "&q=$it" } ?: ""
         return get(url = "${ApiRoute.CHAT.getName()}/peers?limit=$limit$search")
     }
+
+    suspend fun createShare(request: CreateShareRequest): Result<BaseResponse<NoteShare>, Error> =
+        post(url = ApiRoute.SHARES.getName(), requestData = request)
+
+    suspend fun listShares(): Result<BaseResponse<List<NoteShare>>, Error> =
+        get(url = ApiRoute.SHARES.getName())
+
+    suspend fun updateShareMembers(shareId: String, request: UpdateShareMembersRequest): Result<BaseResponse<NoteShare>, Error> =
+        post(url = "${ApiRoute.SHARES.getName()}/$shareId/members", requestData = request)
+
+    suspend fun stopSharing(shareId: String): Result<BaseResponse<StopSharingResult>, Error> =
+        delete(url = "${ApiRoute.SHARES.getName()}/$shareId")
 
     // actual api calls
     private suspend inline fun <reified T> get(

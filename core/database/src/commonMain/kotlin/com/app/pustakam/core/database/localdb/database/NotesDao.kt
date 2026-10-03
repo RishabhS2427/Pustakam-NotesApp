@@ -6,6 +6,10 @@ import com.app.pustakam.core.model.models.Tag
 import com.app.pustakam.core.model.models.response.notes.Note
 import com.app.pustakam.core.model.models.response.notes.NoteContentModel
 import com.app.pustakam.core.model.models.response.notes.Notes
+import com.app.pustakam.core.model.models.share.NoteShareInfo
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import com.app.pustakam.core.database.NoteContent
 import com.app.pustakam.core.database.NotesDatabase
 import com.app.pustakam.core.database.localdb.preferences.BasePreferences
@@ -33,6 +37,10 @@ class NotesDao : KoinComponent {
     private val userId: String get() = prefs.currentUserId()
 
     private val queries = database.notesDatabaseQueries
+
+    private val shareJson = Json { ignoreUnknownKeys = true }
+
+    private val authorsSerializer = MapSerializer(String.serializer(), String.serializer())
 
     // 🔄 24-Sep-2026 — the master editor's layout travels inside its note
     private val canvasDao by lazy { CanvasDao(database) }
@@ -79,7 +87,12 @@ class NotesDao : KoinComponent {
                docCount = (row.docCount ?: 0L).toInt(),
                thumbnailPath = com.app.pustakam.core.common.util.resolveLocalFilePath(row.thumbnailPath),
            )
-       }
+       }.markedShared()
+   }
+
+   private fun List<NoteSummary>.markedShared(): List<NoteSummary> {
+       val shared = sharedNoteIds()
+       return if (shared.isEmpty()) this else map { if (it.id in shared) it.copy(shared = true) else it }
    }
    private var ftsAvailable: Boolean? = null
 
@@ -167,7 +180,7 @@ class NotesDao : KoinComponent {
                createdAt = row.createdAt, updatedAt = row.updatedAt,
            )
        }
-       return merged.values.sortedByDescending { it.updatedAt ?: "" }
+       return merged.values.sortedByDescending { it.updatedAt ?: "" }.markedShared()
    }
    fun selectAllNotesFromDb(limit : Int = 0, page : Int = 0): Notes {
       if (limit > 0 && page > 0) {
@@ -195,6 +208,7 @@ class NotesDao : KoinComponent {
                   deleted = note.deleted == 1L,
                   deletedAt = note.deletedAt,
                   serverUpdatedAt = note.serverUpdatedAt,
+                  share = shareOf(note.noteId),
                   contents = rows.mapNotNull { row ->
                       if (row.contentId != null&& !row.type.isNullOrEmpty()) {
                           val type = ContentType.valueOf(row.type)
@@ -512,17 +526,46 @@ class NotesDao : KoinComponent {
                 updatedAt = note.updatedAt,
                 createdAt = note.createdAt,
                 categoryId = note.categoryId,
-                ownerId = note.ownerId ?: userId,
+                ownerId = if (note.share != null) userId else (note.ownerId ?: userId),
                 version = note.version,
                 syncStatus = SYNC_STATUS_SYNCED,
                 deleted = if (note.deleted) 1L else 0L,
                 deletedAt = note.deletedAt,
                 serverUpdatedAt = note.serverUpdatedAt,
             )
+            writeShare(note.id, note.share.takeUnless { note.deleted })
             if (!note.deleted) note.contents.forEach { insertOrUpdateNotesContent(it) }
             // 🔄 24-Sep-2026 — a pulled layout replaces this device's; a copy that carries none leaves it alone
             if (note.deleted) queries.deleteCanvasNodesForNote(note.id)
             else note.canvas?.takeIf { it.isNotEmpty() }?.let { canvasDao.replaceFromWire(note.id, it) }
+        }
+    }
+
+    fun shareOf(noteId: String): NoteShareInfo? =
+        queries.selectSharedNote(noteId).executeAsOneOrNull()?.let { row ->
+            NoteShareInfo(
+                shareId = row.shareId,
+                role = row.role,
+                ownerId = row.ownerId,
+                ownerName = row.ownerName,
+                authors = runCatching { shareJson.decodeFromString(authorsSerializer, row.authors) }.getOrDefault(emptyMap())
+            )
+        }
+
+    fun sharedNoteIds(): Set<String> = queries.selectSharedNoteIds().executeAsList().toSet()
+
+    private fun writeShare(noteId: String, share: NoteShareInfo?) {
+        if (share == null) {
+            queries.deleteSharedNote(noteId)
+        } else {
+            queries.upsertSharedNote(
+                noteId,
+                share.shareId,
+                share.role,
+                share.ownerId,
+                share.ownerName,
+                shareJson.encodeToString(authorsSerializer, share.authors)
+            )
         }
     }
 
@@ -600,6 +643,7 @@ class NotesDao : KoinComponent {
                 deleted = note.deleted == 1L,
                 deletedAt = note.deletedAt,
                 serverUpdatedAt = note.serverUpdatedAt,
+                share = shareOf(note.noteId),
                 contents = rows.mapNotNull { row ->
                     if (row.contentId != null&&!row.type.isNullOrEmpty()) {
                         val type = ContentType.valueOf(row.type)

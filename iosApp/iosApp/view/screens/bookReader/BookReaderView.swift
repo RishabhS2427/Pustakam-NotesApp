@@ -279,7 +279,7 @@ struct BookReaderView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                if !pages.isEmpty {
+                if !pages.isEmpty && annotations.writable {
                     Button {
                         annotations.drawing.toggleOverlay()
                     } label: {

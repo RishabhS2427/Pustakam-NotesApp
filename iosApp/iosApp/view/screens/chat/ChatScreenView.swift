@@ -15,7 +15,9 @@ struct ChatScreenView: View {
         ChatWidgetView(
             conversationId: conversationId,
             onOpenMedia: { media in router.navigate(to: .NoteBookReader(noteId: conversationId, startContentId: media.id)) },
-            onOpenDocument: { media in router.navigate(to: .BookReader(bookId: media.id)) }
+            onOpenDocument: { media in router.navigate(to: .BookReader(bookId: media.id)) },
+            onOpenNote: { noteId in router.navigate(to: .NoteEditor(noteId: noteId)) },
+            allowsNoteShare: true
         )
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

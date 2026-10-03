@@ -41,6 +41,9 @@ package com.app.pustakam.core.network
      //   also the deep-link shape, pustakam://u/<username>.
      PROFILE_PUBLIC {
          override fun getName(): String = "$baseUrl/u"
+     },
+     SHARES {
+         override fun getName(): String = "$baseUrl/shares"
      };
 
      val baseUrl = getUrl()

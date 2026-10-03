@@ -61,7 +61,7 @@ struct NoteBookView : View {
                 HStack{
                     Spacer()
                     // 🎨 20-Jul-2026 — meta date as tertiary text (spec §2.2 text-3), no heavy gray chip
-                    Text("\(summary.updatedAt?.toLocalFormat(showTime: false) ?? "")")
+                    Text("\(summary.shared ? "Shared · " : "")\(summary.updatedAt?.toLocalFormat(showTime: false) ?? "")")
                         .font(Theme.Fonts.metaCaption)
                         .foregroundColor(Theme.Colors.text3)
                         .padding(.top, 8)
@@ -142,7 +142,8 @@ struct NoteBookView : View {
             videoCount: 0,
             audioCount: 1,
             docCount: 0,
-            thumbnailPath: nil
+            thumbnailPath: nil,
+            shared: false
         ),
              onClick: {
 })

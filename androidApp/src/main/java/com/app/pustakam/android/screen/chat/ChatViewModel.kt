@@ -21,6 +21,8 @@ import com.app.pustakam.feature.chat.domain.usecase.SendChatMessageUseCase
 import com.app.pustakam.feature.chat.domain.usecase.SetChatForegroundUseCase
 import com.app.pustakam.feature.chat.domain.usecase.SetTypingUseCase
 import com.app.pustakam.feature.chat.domain.usecase.StartChatUseCase
+import com.app.pustakam.feature.notes.domain.share.ChatShareSheet
+import com.app.pustakam.feature.notes.domain.usecase.OpenSharedNoteUseCase
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +48,7 @@ class ChatViewModel : BaseViewModel() {
     private val markRead by inject<MarkConversationReadUseCase>()
     private val setTypingUseCase by inject<SetTypingUseCase>()
     private val setForeground by inject<SetChatForegroundUseCase>()
+    private val openShared by inject<OpenSharedNoteUseCase>()
 
     private val _state = MutableStateFlow(ChatState(currentUserId = startChat.currentUserId))
     val state: StateFlow<ChatState> = _state.asStateFlow()
@@ -131,6 +134,12 @@ class ChatViewModel : BaseViewModel() {
         emit(ChatIntent.OlderRequested(current.oldestMessageAt))
         makeAWish<List<ChatMessage>>(CHAT.OLDER, showLoader = false) {
             loadHistory(conversationId, current.oldestMessageAt)
+        }
+    }
+
+    fun openSharedNote(noteId: String, onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            if (openShared(noteId)) onReady(noteId) else emit(ChatIntent.Failed(ChatShareSheet.NOTE_UNAVAILABLE))
         }
     }
 

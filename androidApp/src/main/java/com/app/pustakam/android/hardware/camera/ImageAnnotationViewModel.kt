@@ -86,7 +86,7 @@ class ImageAnnotationViewModel : ViewModel() {
     }
 
     private fun resolve(contents: List<NoteContentModel>) {
-        val id = mediaId ?: return
+        val id = mediaId?.takeIf { annotations.writable.value } ?: return
         val target = DrawNoteContents.editTargetOf(contents, id) ?: return
         val changed = target.id != _target.value?.id
         _target.value = target

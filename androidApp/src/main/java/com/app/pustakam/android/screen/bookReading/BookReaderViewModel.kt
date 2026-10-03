@@ -47,6 +47,8 @@ class BookReaderViewModel : BaseViewModel() {
 
     val drawing: DrawingHost get() = annotations.drawing
 
+    val canAnnotate: StateFlow<Boolean> get() = annotations.writable
+
     private var lastKnownPage: Int = 0
 
     init {

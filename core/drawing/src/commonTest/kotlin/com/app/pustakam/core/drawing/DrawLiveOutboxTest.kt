@@ -65,10 +65,21 @@ class DrawLiveOutboxTest {
     }
 
     @Test
+    fun theOverlayIdIsStableAndPassesTheServersIdRule() {
+        val serverRule = Regex("^\\d{10,17}-[0-9a-fA-F-]{8,64}$")
+        val noteId = "1790863697502-a29aa9aa-cbdc-4493-8924-191cfb2a73c6"
+        assertEquals(DrawNoteContents.overlayId(noteId), DrawNoteContents.overlayId(noteId))
+        assertTrue(serverRule.matches(DrawNoteContents.overlayId(noteId)))
+        assertTrue(DrawNoteContents.overlayId(noteId) != noteId)
+        assertTrue(serverRule.matches(DrawNoteContents.overlayId("legacy-note")))
+    }
+
+    @Test
     fun aRemoteOpLandsInTheOverlayRowWithAStableId() {
-        val overlay = DrawNoteContents.createOverlay("note-1", 3.0)
-        assertEquals(DrawNoteContents.overlayId("note-1"), overlay.id)
-        assertEquals(overlay.id, DrawNoteContents.createOverlay("note-1", 9.0).id)
+        val noteId = "1790863697502-a29aa9aa-cbdc-4493-8924-191cfb2a73c6"
+        val overlay = DrawNoteContents.createOverlay(noteId, 3.0)
+        assertEquals(DrawNoteContents.overlayId(noteId), overlay.id)
+        assertEquals(overlay.id, DrawNoteContents.createOverlay(noteId, 9.0).id)
         assertTrue(overlay.isOverlay())
         val element = DrawTestKit.stroke(DrawTestKit.overlay(), points).document.elements.single()
         val applied = DrawNoteContents.withOp(overlay, DrawOp.Add(listOf(element), "u-ravi", 7L))

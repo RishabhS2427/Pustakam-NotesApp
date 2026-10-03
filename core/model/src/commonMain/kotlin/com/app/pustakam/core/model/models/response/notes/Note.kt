@@ -5,6 +5,7 @@ package com.app.pustakam.core.model.models.response.notes
 
 import com.app.pustakam.core.model.models.RichTextMetadata
 import com.app.pustakam.core.model.models.Version
+import com.app.pustakam.core.model.models.share.NoteShareInfo
 import com.app.pustakam.core.common.util.ContentType
 // 🔧 C6: UniqueIdGenerator import moved out — id generation lives ONLY in NoteContentObjectHelper
 // 🔧 getCurrentTimestamp kept: withX() helpers stamp updatedAt on every edit
@@ -38,6 +39,7 @@ data class Note(
     val contents: List<NoteContentModel> = emptyList(),
     // 🔄 24-Sep-2026 — the master editor's pages and widgets; null means "this copy carries no layout", never "no layout"
     val canvas: List<NoteCanvasNode>? = null,
+    val share: NoteShareInfo? = null,
     ) {
     /** Swift-friendly copy helpers — Kotlin data-class copy() does not export
      *  usable default arguments to Swift, so immutable edits go through these.
@@ -57,6 +59,8 @@ data class Note(
         copy(title = newTitle, contents = newContents, updatedAt = "${getCurrentTimestamp()}", syncStatus = "PENDING")
 
     fun withCanvas(nodes: List<NoteCanvasNode>?): Note = copy(canvas = nodes)
+
+    fun withShare(info: NoteShareInfo?): Note = copy(share = info)
 }
 
 @Serializable

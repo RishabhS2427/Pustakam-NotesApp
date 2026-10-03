@@ -30,6 +30,7 @@ data class NoteSummary(
     val audioCount: Int = 0,
     val docCount: Int = 0,
     val thumbnailPath: String? = null,
+    val shared: Boolean = false,
 )
 
 // 🔧 15-Jul-2026 (iOS parity): a contents-less Note carrying just the identity/header fields.

@@ -13,6 +13,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
@@ -41,6 +44,9 @@ class NoteAnnotations(
 
     fun contents(): List<NoteContentModel> = note?.contents.orEmpty()
 
+    private val _writable = MutableStateFlow(true)
+    val writable: StateFlow<Boolean> = _writable.asStateFlow()
+
     fun follow(noteId: String) {
         if (noteId.isEmpty() || followJob != null) return
         readNote(noteId).apiWithCollect(
@@ -49,6 +55,7 @@ class NoteAnnotations(
             onFailure = { log_d("NoteAnnotations", "note read failed: $it") },
             onSuccess = { result ->
                 val loaded = result.data.data as? Note ?: return@apiWithCollect
+                _writable.value = loaded.share?.canWrite() != false
                 note = loaded
                 refresh(loaded.contents)
             }
@@ -62,7 +69,7 @@ class NoteAnnotations(
     }
 
     fun write(content: NoteContentModel) {
-        val current = note ?: return
+        val current = note?.takeIf { _writable.value } ?: return
         val next = current.withContents(current.contents.filterNot { it.id == content.id } + content)
         note = next
         refresh(next.contents)
@@ -70,7 +77,7 @@ class NoteAnnotations(
     }
 
     fun remove(contentId: String) {
-        val current = note ?: return
+        val current = note?.takeIf { _writable.value } ?: return
         val next = current.withContents(current.contents.filterNot { it.id == contentId })
         note = next
         refresh(next.contents)
@@ -88,7 +95,7 @@ class NoteAnnotations(
     }
 
     private fun schedule(content: NoteContentModel.Drawing) {
-        val current = note ?: return
+        val current = note?.takeIf { _writable.value } ?: return
         note = current.withContents(current.contents.filterNot { it.id == content.id } + content)
         pendingId = content.id
         saveJob?.cancel()

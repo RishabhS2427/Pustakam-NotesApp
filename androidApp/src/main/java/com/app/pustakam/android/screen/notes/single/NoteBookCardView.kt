@@ -38,6 +38,8 @@ import com.app.pustakam.android.widgets.LoadImage
 import com.app.pustakam.core.model.models.response.notes.NoteSummary
 import com.app.pustakam.core.common.extensions.toLocalFormat
 
+private const val SHARED_PREFIX = "Shared · "
+
 @Composable
 fun NoteBookCardView(modifier: Modifier = Modifier, summary: NoteSummary,
                      onClick: () -> Unit = {}) {
@@ -56,7 +58,7 @@ fun NoteBookCardView(modifier: Modifier = Modifier, summary: NoteSummary,
                 verticalArrangement = Arrangement.Top, horizontalAlignment = Alignment.End) {
                 // 🎨 20-Jul-2026 — meta date as tertiary text (spec §2.2 text-3), no heavy gradient chip
                 Text(
-                    summary.updatedAt?.toLocalFormat(showTime = false).toString(),
+                    (if (summary.shared) SHARED_PREFIX else "") + summary.updatedAt?.toLocalFormat(showTime = false).toString(),
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = colorScheme.onSurfaceVariant
                     ), modifier = Modifier.padding(horizontal = 8.dp).padding(top = 8.dp, bottom = 4.dp)

@@ -20,6 +20,15 @@ CREATE TABLE Notes (
  serverUpdatedAt INTEGER
 );
 
+CREATE TABLE SharedNote (
+ noteId TEXT NOT NULL PRIMARY KEY,
+ shareId TEXT NOT NULL,
+ role TEXT NOT NULL,
+ ownerId TEXT NOT NULL,
+ ownerName TEXT,
+ authors TEXT NOT NULL DEFAULT '{}'
+);
+
 CREATE TABLE NoteContent(
 id TEXT NOT NULL PRIMARY KEY,
 noteId TEXT NOT NULL REFERENCES Notes(id) ON DELETE CASCADE ,
@@ -174,6 +183,19 @@ ORDER BY position ASC;
 selectNoteContentById:
 SELECT * FROM NoteContent
 WHERE id = ?;
+
+upsertSharedNote:
+INSERT OR REPLACE INTO SharedNote(noteId, shareId, role, ownerId, ownerName, authors)
+VALUES (?, ?, ?, ?, ?, ?);
+
+deleteSharedNote:
+DELETE FROM SharedNote WHERE noteId = ?;
+
+selectSharedNote:
+SELECT * FROM SharedNote WHERE noteId = ?;
+
+selectSharedNoteIds:
+SELECT noteId FROM SharedNote;
 
 selectAll:
 -- 🔄 20-Aug-2026 sync: deleted = 0 — a tombstone must never surface in a list, search or export

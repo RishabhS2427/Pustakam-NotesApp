@@ -20,11 +20,14 @@ struct ChatWidgetView: View {
     var onAttach: () -> Void = {}
     var onOpenMedia: (NoteContentModel.MediaContent) -> Void = { _ in }
     var onOpenDocument: (NoteContentModel.MediaContent) -> Void = { _ in }
+    var onOpenNote: (String) -> Void = { _ in }
+    var allowsNoteShare = false
 
     @StateObject private var viewModel = ChatViewModel()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.palette) private var palette
     @State private var draft = ""
+    @State private var sharingNote = false
 
     private var state: ChatState { viewModel.state }
 
@@ -53,6 +56,17 @@ struct ChatWidgetView: View {
             }
         }
         .background(Theme.Colors.background)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if allowsNoteShare && !state.isAssistantThread {
+                    Button { sharingNote = true } label: {
+                        Image(systemName: "doc.text").foregroundColor(palette.accent)
+                    }
+                    .accessibilityLabel(Text("Share a note"))
+                }
+            }
+        }
+        .sheet(isPresented: $sharingNote) { ShareToChatSheet(conversationId: conversationId) }
         .onAppear { viewModel.open(conversationId: conversationId) }
         .onDisappear { viewModel.close() }
         // The composer is a local @State so typing stays instant; the reducer still owns the draft
@@ -111,7 +125,8 @@ struct ChatWidgetView: View {
                             isMine: state.isMine(message: message),
                             onDelete: viewModel.delete,
                             onOpenMedia: onOpenMedia,
-                            onOpenDocument: onOpenDocument
+                            onOpenDocument: onOpenDocument,
+                            onOpenNote: { noteId in viewModel.openSharedNote(noteId, onReady: onOpenNote) }
                         )
                         .id(message.id)
                         // Reaching the top asks for the previous page; the ViewModel guards repeats

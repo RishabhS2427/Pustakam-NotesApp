@@ -82,7 +82,7 @@ final class ImageAnnotationViewModel: ObservableObject {
     }
 
     private func resolve(_ contents: [NoteContentModel]) {
-        guard let mediaId, let found = DrawNoteContents.shared.editTargetOf(contents: contents, mediaId: mediaId) else { return }
+        guard let mediaId, annotations.writable, let found = DrawNoteContents.shared.editTargetOf(contents: contents, mediaId: mediaId) else { return }
         let changed = found.id != target?.id
         target = found
         annotations.target(documentId: found.id)
