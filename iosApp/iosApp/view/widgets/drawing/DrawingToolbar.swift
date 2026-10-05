@@ -9,8 +9,7 @@ struct DrawingChrome: View {
 
     @State private var panel: DrawPanel = DrawCommands.shared.noPanel()
     @State private var placement = DrawCommands.shared.toolbarPlacement()
-    @State private var dragStart: DrawToolbarPlacement?
-    @State private var size: CGSize = .zero
+    @State private var measured: CGSize = .zero
 
     private var commands: DrawCommands { DrawCommands.shared }
 
@@ -21,27 +20,21 @@ struct DrawingChrome: View {
             DrawingToolbar(
                 session: session,
                 vertical: fitted.vertical,
+                maxLength: CGFloat(commands.toolbarMaxLength(areaLength: Float(fitted.vertical ? area.height : area.width))),
                 onPanel: { panel = $0 },
                 onDone: onDone,
-                onMove: { move(by: $0, in: area) },
-                onMoveEnd: { dragStart = nil },
-                onTurn: { placement = commands.rotateToolbar(placement: fitted) }
+                onMove: { deltaX, deltaY in move(deltaX: deltaX, deltaY: deltaY, in: area) },
+                onRotate: { placement = commands.rotateToolbar(placement: fitted) }
             )
             .id(ObjectIdentifier(session))
             .background(
                 GeometryReader { toolbar in
-                    Color.clear.preference(key: DrawingToolbarSizeKey.self, value: toolbar.size)
+                    Color.clear.onChange(of: toolbar.size, initial: true) { _, size in measured = size }
                 }
             )
-            .onPreferenceChange(DrawingToolbarSizeKey.self) { size = $0 }
-            .frame(
-                width: fitted.vertical ? nil : length(area.width),
-                height: fitted.vertical ? length(area.height) : nil,
-                alignment: .topLeading
-            )
             .offset(
-                x: CGFloat(fitted.left(width: Float(size.width))),
-                y: CGFloat(fitted.top(height: Float(size.height)))
+                x: CGFloat(fitted.left(width: Float(measured.width))),
+                y: CGFloat(fitted.top(height: Float(measured.height)))
             )
             .opacity(fitted.placed ? 1 : 0)
         }
@@ -54,93 +47,65 @@ struct DrawingChrome: View {
         .onChange(of: ObjectIdentifier(session)) { _, _ in panel = DrawCommands.shared.noPanel() }
     }
 
-    private func length(_ area: CGFloat) -> CGFloat {
-        CGFloat(commands.toolbarMaxLength(areaLength: Float(area)))
-    }
-
     private func fit(_ value: DrawToolbarPlacement, in area: CGSize) -> DrawToolbarPlacement {
         commands.fitToolbar(
             placement: value,
-            width: Float(size.width),
-            height: Float(size.height),
+            width: Float(measured.width),
+            height: Float(measured.height),
             areaWidth: Float(area.width),
             areaHeight: Float(area.height)
         )
     }
 
-    private func move(by translation: CGSize, in area: CGSize) {
-        let start = dragStart ?? fit(placement, in: area)
-        dragStart = start
+    private func move(deltaX: CGFloat, deltaY: CGFloat, in area: CGSize) {
         placement = commands.moveToolbar(
-            placement: start,
-            deltaX: Float(translation.width),
-            deltaY: Float(translation.height),
-            width: Float(size.width),
-            height: Float(size.height),
+            placement: fit(placement, in: area),
+            deltaX: Float(deltaX),
+            deltaY: Float(deltaY),
+            width: Float(measured.width),
+            height: Float(measured.height),
             areaWidth: Float(area.width),
             areaHeight: Float(area.height)
         )
-    }
-}
-
-private struct DrawingToolbarSizeKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
     }
 }
 
 struct DrawingToolbar: View {
 
     let session: DrawingSession
-    var vertical: Bool = false
+    let vertical: Bool
+    let maxLength: CGFloat
     let onPanel: (DrawPanel) -> Void
     let onDone: () -> Void
-    var onMove: (CGSize) -> Void = { _ in }
-    var onMoveEnd: () -> Void = {}
-    var onTurn: () -> Void = {}
+    let onMove: (CGFloat, CGFloat) -> Void
+    let onRotate: () -> Void
 
     @Environment(\.colorScheme) private var scheme
     @State private var toolbar: DrawToolbarState?
-
-    private var palette: SmartTextPalette { SmartTextPalette.of(scheme) }
+    @State private var dragged: CGSize = .zero
+    @GestureState private var dragging = false
 
     private var commands: DrawCommands { DrawCommands.shared }
 
     var body: some View {
+        let colors = SmartTextPalette.of(scheme)
         let current = toolbar ?? commands.toolbar(state: session.current)
-        ViewThatFits(in: vertical ? .vertical : .horizontal) {
-            strip(current)
-            ScrollView(vertical ? .vertical : .horizontal, showsIndicators: false) { strip(current) }
-        }
-        .fixedSize(horizontal: vertical, vertical: !vertical)
-        .background(RoundedRectangle(cornerRadius: 12).fill(palette.toolbar))
-        .onReceive(session.$state.map { DrawCommands.shared.toolbar(state: $0) }.removeDuplicates()) { toolbar = $0 }
-    }
-
-    private func strip(_ current: DrawToolbarState) -> some View {
-        let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
-        return layout {
+        DrawingToolbarStrip(vertical: vertical, maxLength: maxLength) {
             Image(systemName: DrawingIcons.move)
                 .font(.system(size: 16))
-                .foregroundColor(palette.onSurfaceMuted)
+                .foregroundColor(colors.onSurfaceMuted)
                 .frame(width: 40, height: 40)
                 .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(coordinateSpace: .global)
-                        .onChanged { onMove($0.translation) }
-                        .onEnded { _ in onMoveEnd() }
-                )
+                .gesture(moveGesture)
                 .accessibilityLabel(Text("Move toolbar"))
-            DrawingToolButton(icon: DrawingIcons.turn, label: "Turn toolbar", tint: palette.onSurface, action: onTurn)
-            DrawingToolButton(icon: DrawingIcons.done, label: "Done", tint: palette.accent, action: onDone)
+            DrawingToolButton(icon: DrawingIcons.turn, label: "Turn toolbar", tint: colors.onSurface, action: onRotate)
+            DrawingToolButton(icon: DrawingIcons.done, label: "Done", tint: colors.accent, action: onDone)
             DrawingToolbarDivider(vertical: vertical)
             ForEach(current.tools, id: \.id) { spec in
                 DrawingToolButton(
                     icon: DrawingIcons.tool(spec.iconKey),
                     label: spec.label,
-                    tint: current.isTool(value: spec.id) ? palette.accent : palette.onSurface
+                    tint: current.isTool(value: spec.id) ? colors.accent : colors.onSurface
                 ) {
                     if commands.opensPanel(state: session.current, tool: spec.id) {
                         onPanel(commands.panelFor(tool: spec.id))
@@ -152,36 +117,96 @@ struct DrawingToolbar: View {
             DrawingColorDot(color: current.color) { onPanel(commands.colorPanel()) }
             if current.navigates {
                 DrawingToolbarDivider(vertical: vertical)
-                DrawingToolButton(icon: DrawingIcons.zoomOut, label: "Zoom out", tint: palette.onSurface) {
+                DrawingToolButton(icon: DrawingIcons.zoomOut, label: "Zoom out", tint: colors.onSurface) {
                     session.dispatch(commands.zoomOut())
                 }
                 Text("\(current.zoomPercent)%")
                     .font(.system(size: 13))
-                    .foregroundColor(palette.onSurfaceMuted)
-                DrawingToolButton(icon: DrawingIcons.zoomIn, label: "Zoom in", tint: palette.onSurface) {
+                    .foregroundColor(colors.onSurfaceMuted)
+                DrawingToolButton(icon: DrawingIcons.zoomIn, label: "Zoom in", tint: colors.onSurface) {
                     session.dispatch(commands.zoomIn())
                 }
-                DrawingToolButton(icon: DrawingIcons.fit, label: "Fit", tint: palette.onSurface) {
+                DrawingToolButton(icon: DrawingIcons.fit, label: "Fit", tint: colors.onSurface) {
                     session.dispatch(commands.fitPaper())
                 }
                 if current.rotated {
-                    DrawingToolButton(icon: DrawingIcons.resetRotation, label: "Reset rotation", tint: palette.onSurface) {
+                    DrawingToolButton(icon: DrawingIcons.resetRotation, label: "Reset rotation", tint: colors.onSurface) {
                         session.dispatch(commands.resetRotation())
                     }
                 }
             }
             DrawingToolbarDivider(vertical: vertical)
             if current.showsPaper {
-                DrawingToolButton(icon: DrawingIcons.paper, label: "Paper", tint: palette.onSurface) {
+                DrawingToolButton(icon: DrawingIcons.paper, label: "Paper", tint: colors.onSurface) {
                     onPanel(commands.paperPanel())
                 }
             }
-            DrawingToolButton(icon: DrawingIcons.settings, label: "Drawing settings", tint: palette.onSurface) {
+            DrawingToolButton(icon: DrawingIcons.settings, label: "Drawing settings", tint: colors.onSurface) {
                 onPanel(commands.settingsPanel())
             }
         }
-        .padding(.horizontal, vertical ? 2 : 6)
-        .padding(.vertical, vertical ? 6 : 2)
+        .scrollDisabled(dragging)
+        .onChange(of: dragging) { _, active in
+            if !active { dragged = .zero }
+        }
+        .onReceive(session.$state.map { DrawCommands.shared.toolbar(state: $0) }.removeDuplicates()) { toolbar = $0 }
+    }
+
+    private var moveGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .global)
+            .updating($dragging) { _, active, _ in active = true }
+            .onChanged { value in
+                onMove(value.translation.width - dragged.width, value.translation.height - dragged.height)
+                dragged = value.translation
+            }
+    }
+}
+
+private struct DrawingToolbarStrip<Content: View>: View {
+
+    let vertical: Bool
+    let maxLength: CGFloat
+    @ViewBuilder let content: () -> Content
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        DrawingToolbarLength(vertical: vertical, maxLength: maxLength) {
+            ViewThatFits(in: vertical ? .vertical : .horizontal) {
+                strip
+                ScrollView(vertical ? .vertical : .horizontal, showsIndicators: false) { strip }
+            }
+            .background(RoundedRectangle(cornerRadius: 12).fill(SmartTextPalette.of(scheme).toolbar))
+        }
+        .fixedSize(horizontal: vertical, vertical: !vertical)
+    }
+
+    private var strip: some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+        return layout { content() }
+            .padding(.horizontal, vertical ? 2 : 6)
+            .padding(.vertical, vertical ? 6 : 2)
+    }
+}
+
+private struct DrawingToolbarLength: Layout {
+
+    let vertical: Bool
+    let maxLength: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        subviews.first?.sizeThatFits(capped(proposal)) ?? .zero
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: capped(proposal))
+    }
+
+    private func capped(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        if vertical {
+            return ProposedViewSize(width: proposal.width, height: min(proposal.height ?? maxLength, maxLength))
+        }
+        return ProposedViewSize(width: min(proposal.width ?? maxLength, maxLength), height: proposal.height)
     }
 }
 

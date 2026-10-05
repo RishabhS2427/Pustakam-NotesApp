@@ -2,6 +2,13 @@ import shared
 import Combine
 import SwiftUI
 
+enum LiveConnectionStatus {
+    case idle
+    case connecting
+    case connected
+    case failed(String)
+}
+
 final class MasterEditorViewModel: ObservableObject {
 
     @Published private(set) var note: Note?
@@ -19,6 +26,7 @@ final class MasterEditorViewModel: ObservableObject {
     @Published var keyboardDismissToken: Int = 0
     @Published private(set) var live: DrawLiveRoom?
     @Published private(set) var access = NoteAccessGate.companion.open(userId: "")
+    @Published private(set) var liveConnectionStatus: LiveConnectionStatus = .idle
 
     private(set) lazy var drawing = DrawingHost(
         contents: { [weak self] in self?.noteContents ?? [] },
@@ -42,6 +50,7 @@ final class MasterEditorViewModel: ObservableObject {
     private var editDepth = 0
     private var editStart: Note?
     private var trashedFiles = Set<String>()
+    private var lastCheckedNoteId: String?
 
     private var drawingChanges = Set<AnyCancellable>()
 
@@ -216,6 +225,16 @@ final class MasterEditorViewModel: ObservableObject {
         }
         // 🎧 the canvas plays through the SAME shared player as the note editor — it needs this note's media list
         contentBridge.setSelectedNote(note: note)
+        // Auto-join live room if note is shared
+        if lastCheckedNoteId != note.id {
+            lastCheckedNoteId = note.id
+            // Always check via shareBridge (database query) for shared notes
+            let access = shareBridge.accessOf(noteId: note.id)
+            if access.shared && live == nil {
+                // Join immediately
+                startLive()
+            }
+        }
         guard hydratedNoteId != note.id else {
             refreshMissingTexts()
             return
@@ -735,12 +754,16 @@ final class MasterEditorViewModel: ObservableObject {
 
     private func startLive() {
         guard let roomId = note?.id else { return }
+        liveConnectionStatus = .connecting
         liveOutbox = DrawLiveOutbox(roomId: roomId)
         live = DrawLive.shared.joining(roomId: roomId)
         liveBridge.join(roomId: roomId)
         liveHandles = [
             liveBridge.observeRoom(roomId: roomId) { [weak self] room in
-                if let room { self?.onLiveRoom(room) }
+                if let room {
+                    self?.liveConnectionStatus = .connected
+                    self?.onLiveRoom(room)
+                }
             },
             liveBridge.observeEvents(roomId: roomId) { [weak self] event in self?.onLiveEvent(event) }
         ]
@@ -760,6 +783,7 @@ final class MasterEditorViewModel: ObservableObject {
         liveOutbox = nil
         liveBridge.leave(roomId: room.roomId)
         live = nil
+        liveConnectionStatus = .idle
     }
 
     private func onLiveRoom(_ room: DrawLiveRoom) {

@@ -320,7 +320,10 @@ fun MasterEditorScreen(
                     )
                 }
             }
-            if (!readOnly) IconButton(onClick = viewModel::toggleDrawingOverlay) {
+            IconButton(
+                onClick = viewModel::toggleDrawingOverlay,
+                enabled = !readOnly
+            ) {
                 Icon(
                     Icons.Default.Edit,
                     contentDescription = "Draw on board",

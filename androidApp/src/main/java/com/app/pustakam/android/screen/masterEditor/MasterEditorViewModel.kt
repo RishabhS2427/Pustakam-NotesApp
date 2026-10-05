@@ -96,6 +96,14 @@ import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import org.koin.core.component.inject
 
+
+sealed class LiveConnectionStatus {
+    object Idle : LiveConnectionStatus()
+    object Connecting : LiveConnectionStatus()
+    object Connected : LiveConnectionStatus()
+    data class Failed(val message: String) : LiveConnectionStatus()
+}
+
 data class MasterEditorUiState(
     val note: Note? = null,
     val canvas: CanvasEditorState = CanvasEditorState(),
@@ -107,6 +115,7 @@ data class MasterEditorUiState(
     val history: NoteHistory = NoteHistory(),
     val live: DrawLiveRoom? = null,
     val access: NoteAccessGate = NoteAccessGate.open(""),
+    val liveConnectionStatus: LiveConnectionStatus = LiveConnectionStatus.Idle,
     val error: String? = null
 ) {
     fun textFor(nodeId: String): MasterTextState? = texts[nodeId]
@@ -685,7 +694,10 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     private fun startLive() {
         val roomId = _state.value.note?.id ?: return
         liveOutbox = DrawLiveOutbox(roomId)
-        _state.update { it.copy(live = DrawLive.joining(roomId)) }
+        _state.update { it.copy(
+            live = DrawLive.joining(roomId),
+            liveConnectionStatus = LiveConnectionStatus.Connecting
+        ) }
         joinLiveRoom(roomId)
         liveJobs = listOf(
             viewModelScope.launch {
@@ -711,19 +723,42 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
 
     private fun onLiveRoom(room: DrawLiveRoom) {
         val previous = _state.value.live ?: return
-        _state.update { it.copy(live = room) }
-        if (room.syncRevision > previous.syncRevision) requestSync()
+        val membersChanged = room.members.size != previous.members.size || room.members != previous.members
+        _state.update { it.copy(
+            live = room,
+            liveConnectionStatus = LiveConnectionStatus.Connected
+        ) }
+        // Sync if server data changed, members changed, or locks changed
+        if (room.syncRevision > previous.syncRevision || membersChanged || room.locks != previous.locks) {
+            requestSync()
+        }
         claimLivePage()
     }
 
     private fun onLiveEvent(event: DrawLiveEvent) {
-        if (event !is DrawLiveEvent.Op) return
-        val session = drawing.overlaySession(create = true) ?: return
-        remoteDepth++
-        try {
-            session.dispatch(DrawCommands.applyRemote(event.op))
-        } finally {
-            remoteDepth--
+        when (event) {
+            is DrawLiveEvent.Op -> {
+                val session = drawing.overlaySession(create = true) ?: return
+                remoteDepth++
+                try {
+                    session.dispatch(DrawCommands.applyRemote(event.op))
+                } finally {
+                    remoteDepth--
+                }
+            }
+            is DrawLiveEvent.State -> {
+                // Member presence changed - sync immediately to get latest changes
+                requestSync()
+            }
+            is DrawLiveEvent.Sync -> {
+                // Server has new data - sync immediately
+                requestSync()
+            }
+            is DrawLiveEvent.Disconnected -> {
+                // Reconnected - sync to get any missed changes
+                requestSync()
+            }
+            else -> {} // Stroke, Denied, Closed handled elsewhere
         }
     }
 
@@ -746,6 +781,7 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
     private fun shareLiveChanges() {
         val roomId = _state.value.live?.roomId ?: return
         claimLivePage()
+        // Immediate sync to broadcast changes to other connected users
         requestSync()
         viewModelScope.launch {
             delay(LIVE_SYNC_DELAY_MILLIS)
@@ -1016,7 +1052,20 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
                         error = null
                     )
                 }
-                if (access.shared && _state.value.live == null) startLive()
+                // Auto-join live if note is shared
+                // Always check via readNoteAccess (queries database) for accurate share status
+                if (access.shared && _state.value.live == null) {
+                    startLive()
+                } else {
+                    // Retry after short delay in case share data just synced from server
+                    viewModelScope.launch {
+                        delay(100)
+                        val retryAccess = readNoteAccess(note.id)
+                        if (retryAccess.shared && _state.value.live == null) {
+                            startLive()
+                        }
+                    }
+                }
                 // 🎧 the canvas plays through the SAME shared player as the note editor — it needs this note's media list
                 setSelectedNoteContentUseCase(note)
                 readCanvasOf(note)
@@ -1030,6 +1079,10 @@ class MasterEditorViewModel : BaseViewModel(), KoinComponent {
                 _state.update { state ->
                     val live = state.note?.contents ?: note.contents
                     state.copy(note = note.copy(contents = live), isLoading = false, error = null)
+                }
+                // Broadcast to live room immediately so other users see the change
+                if (_state.value.access.shared && _state.value.live != null) {
+                    shareLiveChanges()
                 }
                 runPendingOpen()
             }
